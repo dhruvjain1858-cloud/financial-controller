@@ -7,6 +7,7 @@ import { Mail, Phone, Lock, ArrowRight, CheckCircle2, Shield, User, Loader2, Eye
 import { CurrencyInput } from "@/components/CurrencyInput";
 import { generateId, todayISO } from "@/utils/helpers";
 import { DEFAULT_CATEGORIES, FinancialState } from "@/types";
+import { supabase } from "@/utils/supabaseClient";
 
 const GOOGLE_SVG = (
   <svg viewBox="0 0 24 24" className="w-5 h-5">
@@ -127,28 +128,73 @@ export function OnboardingFlow() {
   const isValidLogin = isEmail ? validateEmail(loginId) : validatePhone(loginId);
 
   // ── Handlers ──
+  const handleSignup = async () => {
+    if (!loginId || !password || !name) {
+      alert("Please fill all fields");
+      return;
+    }
+    setLoading(true);
+    const { data, error } = await supabase.auth.signUp({
+      email: loginId,
+      password
+    });
+
+    if (error) {
+      alert(error.message);
+      setLoading(false);
+      return;
+    }
+
+    if (data?.user) {
+      await supabase.from("users").insert([
+        {
+          auth_id: data.user.id,
+          email: data.user.email,
+          name: name
+        }
+      ]);
+    }
+
+    alert("Signup successful");
+    setUser({ name, monthlyIncome: 80000 });
+    setBalance(200000);
+    completeOnboarding();
+    window.location.href = "/";
+  };
+
+  const handleLogin = async () => {
+    if (!loginId || !password) {
+      alert("Please fill all fields");
+      return;
+    }
+    setLoading(true);
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: loginId,
+      password
+    });
+
+    if (error) {
+      alert(error.message);
+      setLoading(false);
+    } else {
+      alert("Login successful");
+      const { data: userData } = await supabase.from("users").select("*").eq("auth_id", data.user.id).single();
+      if (userData && userData.name) {
+        setName(userData.name);
+        setUser({ name: userData.name, monthlyIncome: 80000 });
+      } else {
+        setName("User");
+        setUser({ name: "User", monthlyIncome: 80000 });
+      }
+      setBalance(200000);
+      completeOnboarding();
+      window.location.href = "/";
+    }
+  };
+
   const handleContinueAuth = () => {
     setError("");
-    if (!loginId.trim()) { setError("Please enter your email or phone number"); return; }
-    if (!isValidLogin) {
-      setError(isEmail ? "Please enter a valid email address" : "Please enter a valid 10-digit phone number");
-      return;
-    }
 
-    // Both signup and login OTP mode → send OTP
-    if (authMode === "signup" || loginMethod === "otp") {
-      setLoading(true);
-      setTimeout(() => {
-        setLoading(false);
-        setOtpSent(true);
-        setResendCooldown(30);
-      }, 1200);
-      return;
-    }
-
-    // Password login
-    if (!password) { setError("Please enter your password"); return; }
-    
     // DEMO ACCOUNT CHECK
     if (loginId.trim() === "dhruvjain1858@gmail.com" && password === "dhruv@2592") {
       setLoading(true);
@@ -159,21 +205,28 @@ export function OnboardingFlow() {
       return;
     }
 
-    // Normal validation (prevent normal login for now since it's a frontend simulation)
     if (loginId.trim() === "dhruvjain1858@gmail.com" && password !== "dhruv@2592") {
       setError("Invalid email or password");
       return;
     }
 
-    if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
+    if (authMode === "signup") {
+      handleSignup();
+      return;
+    }
+
+    if (loginMethod === "password") {
+      handleLogin();
+      return;
+    }
+
+    // OTP login mock
     setLoading(true);
     setTimeout(() => {
-      setName("Dhruv Jain");
       setLoading(false);
-      setUser({ name: "Dhruv Jain", monthlyIncome: 80000 });
-      setBalance(200000);
-      completeOnboarding();
-    }, 1500);
+      setOtpSent(true);
+      setResendCooldown(30);
+    }, 1200);
   };
 
   const handleOtpChange = (idx: number, val: string) => {
@@ -330,6 +383,20 @@ export function OnboardingFlow() {
       </div>
 
       {/* Smart Input */}
+      {authMode === "signup" && (
+        <div className="relative group">
+          <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors z-10 ${name ? "text-primary" : "text-muted-foreground"}`}>
+            <User className="w-4 h-4" />
+          </div>
+          <input type="text" value={name} onChange={e => { setName(e.target.value); setError(""); }}
+            className={`w-full bg-background/80 border ${error && !name ? "border-danger" : "border-border/60"} rounded-xl pl-11 pr-4 pt-5 pb-2 text-base focus:outline-none focus:ring-2 focus:ring-primary/80 focus:border-transparent transition-all`}
+          />
+          <label className={`absolute left-11 transition-all duration-200 pointer-events-none ${name ? "top-1.5 text-[10px] text-primary font-medium" : "top-1/2 -translate-y-1/2 text-sm text-muted-foreground"}`}>
+            Full Name
+          </label>
+        </div>
+      )}
+
       <div className="relative group">
         <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors z-10 ${loginId ? "text-primary" : "text-muted-foreground"}`}>
           {isEmail ? <Mail className="w-4 h-4" /> : loginId.length > 0 ? <Phone className="w-4 h-4" /> : <User className="w-4 h-4" />}
@@ -338,7 +405,7 @@ export function OnboardingFlow() {
           className={`w-full bg-background/80 border ${error && !loginId ? "border-danger" : "border-border/60"} rounded-xl pl-11 pr-4 pt-5 pb-2 text-base focus:outline-none focus:ring-2 focus:ring-primary/80 focus:border-transparent transition-all`}
         />
         <label className={`absolute left-11 transition-all duration-200 pointer-events-none ${loginId ? "top-1.5 text-[10px] text-primary font-medium" : "top-1/2 -translate-y-1/2 text-sm text-muted-foreground"}`}>
-          Email or Phone Number
+          Email Address
         </label>
       </div>
 
@@ -353,27 +420,29 @@ export function OnboardingFlow() {
               </button>
             ))}
           </div>
-          {loginMethod === "password" && (
-            <div className="relative group">
-              <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors z-10 ${password ? "text-primary" : "text-muted-foreground"}`}>
-                <Lock className="w-4 h-4" />
-              </div>
-              <input type={showPassword ? "text" : "password"} value={password} onChange={e => { setPassword(e.target.value); setError(""); }}
-                placeholder="Enter password"
-                className="w-full bg-background/80 border border-border/60 rounded-xl pl-11 pr-12 py-3.5 text-base focus:outline-none focus:ring-2 focus:ring-primary/80 focus:border-transparent transition-all"
-              />
-              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          )}
         </>
       )}
 
+      {/* Password field for Signup OR Login (if password method) */}
+      {(authMode === "signup" || (authMode === "login" && loginMethod === "password")) && (
+        <div className="relative group">
+          <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors z-10 ${password ? "text-primary" : "text-muted-foreground"}`}>
+            <Lock className="w-4 h-4" />
+          </div>
+          <input type={showPassword ? "text" : "password"} value={password} onChange={e => { setPassword(e.target.value); setError(""); }}
+            placeholder="Enter password"
+            className="w-full bg-background/80 border border-border/60 rounded-xl pl-11 pr-12 py-3.5 text-base focus:outline-none focus:ring-2 focus:ring-primary/80 focus:border-transparent transition-all"
+          />
+          <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </button>
+        </div>
+      )}
+
       {/* CTA */}
-      <button onClick={handleContinueAuth} disabled={loading || !loginId.trim()}
+      <button onClick={authMode === "signup" ? handleSignup : (loginMethod === "password" ? handleLogin : handleContinueAuth)} disabled={loading || !loginId.trim() || (authMode === "signup" && (!name.trim() || !password.trim()))}
         className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium flex items-center justify-center gap-2 transition-all hover:shadow-lg hover:shadow-blue-500/25 hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none">
-        {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Verifying...</> : <>{authMode === "login" && loginMethod === "password" ? "Login with Password" : "Send OTP"} <ArrowRight className="w-4 h-4" /></>}
+        {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Verifying...</> : <>{authMode === "signup" ? "Sign Up" : (loginMethod === "password" ? "Login" : "Send OTP")} <ArrowRight className="w-4 h-4" /></>}
       </button>
 
       {/* Divider */}
