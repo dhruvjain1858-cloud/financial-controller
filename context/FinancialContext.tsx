@@ -12,6 +12,7 @@ import {
   initialState,
 } from "@/types";
 import { detectCategory } from "@/utils/smartInput";
+import { supabase } from "@/utils/supabaseClient";
 
 // ─── Action types ───────────────────────────────────────────────
 type Action =
@@ -380,7 +381,8 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
     }
   }, [state.theme]);
 
-  const signOut = useCallback(() => {
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
     localStorage.clear(); // Clear all localStorage as requested
     window.location.href = "/"; // Full reload to clear all state and redirect
   }, []);
