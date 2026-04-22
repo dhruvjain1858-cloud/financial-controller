@@ -12,7 +12,7 @@ import {
   initialState,
 } from "@/types";
 import { detectCategory } from "@/utils/smartInput";
-import { supabase } from "@/utils/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 
 // ─── Action types ───────────────────────────────────────────────
 type Action =
@@ -274,6 +274,63 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
     }
     setLoaded(true);
   }, []);
+
+  // Restore session from Supabase
+  useEffect(() => {
+    const restoreSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      
+      if (user) {
+        try {
+          // Store/Update user profile from OAuth data if needed
+          const { data: profile, error: profileError } = await supabase
+            .from("users")
+            .select("name")
+            .eq("auth_id", user.id)
+            .single();
+          
+          let userName = profile?.name;
+
+          if (profileError || !userName) {
+            userName = user.user_metadata?.full_name || user.email?.split("@")[0] || "User";
+            await supabase.from("users").upsert([
+              {
+                auth_id: user.id,
+                email: user.email,
+                name: userName
+              }
+            ]);
+          }
+          
+          dispatch({ 
+            type: "SET_USER", 
+            payload: { 
+              name: userName, 
+              monthlyIncome: state.user.monthlyIncome || 0,
+              isDemo: false
+            } 
+          });
+
+          // If we just arrived from an OAuth redirect, ensure onboarding is marked complete if profile exists
+          if (userName && !state.onboarded) {
+            dispatch({ type: "COMPLETE_ONBOARDING" });
+          }
+
+        } catch (err) {
+          console.error("Error restoring session:", err);
+        }
+      }
+    };
+    restoreSession();
+
+    // Listen for auth state changes (crucial for OAuth)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) restoreSession();
+    });
+
+    return () => subscription.unsubscribe();
+  }, [state.onboarded]);
 
   // Persist to localStorage on every state change
   useEffect(() => {

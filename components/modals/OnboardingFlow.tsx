@@ -7,7 +7,7 @@ import { Mail, Phone, Lock, ArrowRight, CheckCircle2, Shield, User, Loader2, Eye
 import { CurrencyInput } from "@/components/CurrencyInput";
 import { generateId, todayISO } from "@/utils/helpers";
 import { DEFAULT_CATEGORIES, FinancialState } from "@/types";
-import { supabase } from "@/utils/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 
 const GOOGLE_SVG = (
   <svg viewBox="0 0 24 24" className="w-5 h-5">
@@ -91,7 +91,7 @@ export function OnboardingFlow() {
 
   // Flow state
   const [step, setStep] = useState(0); // 0=auth, 1=profile, 2=financial
-  const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
+  const [authMode, setAuthMode] = useState<"signup" | "login" | "forgot">("signup");
   const [loginMethod, setLoginMethod] = useState<"otp" | "password">("otp");
   const [otpSent, setOtpSent] = useState(false);
 
@@ -178,11 +178,21 @@ export function OnboardingFlow() {
       setLoading(false);
     } else {
       alert("Login successful");
-      const { data: userData } = await supabase.from("users").select("*").eq("auth_id", data.user.id).single();
-      if (userData && userData.name) {
-        setName(userData.name);
-        setUser({ name: userData.name, monthlyIncome: 80000 });
-      } else {
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        if (userData?.user) {
+          const { data: profile } = await supabase
+            .from("users")
+            .select("name")
+            .eq("auth_id", userData.user.id)
+            .single();
+          
+          const finalName = profile?.name ? profile.name : "User";
+          setName(finalName);
+          setUser({ name: finalName, monthlyIncome: 80000, isDemo: false });
+        }
+      } catch (err) {
+        console.error("Error fetching user profile:", err);
         setName("User");
         setUser({ name: "User", monthlyIncome: 80000 });
       }
@@ -190,6 +200,25 @@ export function OnboardingFlow() {
       completeOnboarding();
       window.location.href = "/";
     }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!loginId) {
+      alert("Please enter your email address");
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(loginId, {
+      redirectTo: window.location.origin + "/reset-password",
+    });
+
+    if (error) {
+      alert(error.message);
+    } else {
+      alert("Password reset email sent. Please check your inbox.");
+      setAuthMode("login");
+    }
+    setLoading(false);
   };
 
   const handleContinueAuth = () => {
@@ -212,6 +241,11 @@ export function OnboardingFlow() {
 
     if (authMode === "signup") {
       handleSignup();
+      return;
+    }
+
+    if (authMode === "forgot") {
+      handleForgotPassword();
       return;
     }
 
@@ -289,14 +323,20 @@ export function OnboardingFlow() {
     setResendCooldown(30);
   };
 
-  const handleGoogleLogin = () => {
+  const handleGoogleLogin = async () => {
     setGoogleLoading(true);
-    setTimeout(() => {
-      setName("Dhruv Jain");
-      setLoginId("dhruv@demo.com");
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+
+    if (error) {
+      console.error("Google login error:", error.message);
+      alert(error.message);
       setGoogleLoading(false);
-      setStep(1);
-    }, 1500);
+    }
   };
 
   const handleSkip = () => {
@@ -373,14 +413,16 @@ export function OnboardingFlow() {
   const authContent = (
     <div className="space-y-4">
       {/* Tabs */}
-      <div className="flex rounded-xl bg-muted/50 p-1 mb-2">
-        {(["signup", "login"] as const).map(m => (
-          <button key={m} onClick={() => { setAuthMode(m); setError(""); setOtpSent(false); }}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${authMode === m ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-            {m === "signup" ? "Sign Up" : "Login"}
-          </button>
-        ))}
-      </div>
+      {authMode !== "forgot" && (
+        <div className="flex rounded-xl bg-muted/50 p-1 mb-2">
+          {(["signup", "login"] as const).map(m => (
+            <button key={m} onClick={() => { setAuthMode(m); setError(""); setOtpSent(false); }}
+              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${authMode === m ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+              {m === "signup" ? "Sign Up" : "Login"}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Smart Input */}
       {authMode === "signup" && (
@@ -439,10 +481,18 @@ export function OnboardingFlow() {
         </div>
       )}
 
+      {authMode === "login" && loginMethod === "password" && (
+        <div className="flex justify-end">
+          <button onClick={() => setAuthMode("forgot")} className="text-[10px] text-muted-foreground hover:text-primary transition-colors">
+            Forgot Password?
+          </button>
+        </div>
+      )}
+
       {/* CTA */}
-      <button onClick={authMode === "signup" ? handleSignup : (loginMethod === "password" ? handleLogin : handleContinueAuth)} disabled={loading || !loginId.trim() || (authMode === "signup" && (!name.trim() || !password.trim()))}
+      <button onClick={authMode === "signup" ? handleSignup : (authMode === "forgot" ? handleForgotPassword : (loginMethod === "password" ? handleLogin : handleContinueAuth))} disabled={loading || !loginId.trim() || (authMode === "signup" && (!name.trim() || !password.trim()))}
         className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium flex items-center justify-center gap-2 transition-all hover:shadow-lg hover:shadow-blue-500/25 hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none">
-        {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Verifying...</> : <>{authMode === "signup" ? "Sign Up" : (loginMethod === "password" ? "Login" : "Send OTP")} <ArrowRight className="w-4 h-4" /></>}
+        {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Verifying...</> : <>{authMode === "signup" ? "Sign Up" : (authMode === "forgot" ? "Send Reset Link" : (loginMethod === "password" ? "Login" : "Send OTP"))} <ArrowRight className="w-4 h-4" /></>}
       </button>
 
       {/* Divider */}
@@ -468,7 +518,7 @@ export function OnboardingFlow() {
       <div className="flex flex-col items-center gap-2 pt-2">
         <button onClick={() => { setAuthMode(authMode === "signup" ? "login" : "signup"); setError(""); }}
           className="text-xs text-muted-foreground hover:text-primary transition-colors">
-          {authMode === "signup" ? "Already have an account? Login" : "New here? Create account"}
+          {authMode === "forgot" ? "Back to Login" : (authMode === "signup" ? "Already have an account? Login" : "New here? Create account")}
         </button>
         <button onClick={handleSkip} className="text-[11px] text-muted-foreground/60 hover:text-primary transition-colors underline underline-offset-2">
           Skip & explore demo

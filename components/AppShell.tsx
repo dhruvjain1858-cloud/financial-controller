@@ -9,7 +9,7 @@ import { usePathname } from "next/navigation";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const isAuthPage = pathname === "/auth";
+  const isAuthPage = pathname === "/auth" || pathname === "/reset-password" || pathname === "/forgot-password" || pathname === "/verify-otp";
 
   return (
     <FinancialProvider>

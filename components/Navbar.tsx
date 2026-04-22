@@ -96,7 +96,7 @@ export const Navbar = () => {
                   className="absolute right-0 top-10 w-52 glass-card rounded-xl border border-white/10 overflow-hidden shadow-2xl z-50">
                   <div className="p-3 border-b border-white/5 relative overflow-hidden">
                     {state.user.isDemo && <div className="absolute top-0 right-0 bg-warning text-warning-foreground text-[8px] font-bold px-1.5 py-0.5 rounded-bl tracking-wider uppercase">Demo</div>}
-                    <p className="font-semibold text-sm pr-6">{state.user.name || "User"}</p>
+                    <p className="font-semibold text-sm pr-6">{state.user.name ? state.user.name : "User"}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">₹{state.user.monthlyIncome.toLocaleString("en-IN")}/mo</p>
                   </div>
                   <div className="py-1">
