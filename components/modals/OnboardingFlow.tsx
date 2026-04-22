@@ -4,10 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { useFinancial } from "@/context/FinancialContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { Mail, Phone, Lock, ArrowRight, CheckCircle2, Shield, User, Loader2, Eye, EyeOff, KeyRound } from "lucide-react";
+import { supabase } from "@/utils/supabaseClient";
 import { CurrencyInput } from "@/components/CurrencyInput";
-import { generateId, todayISO } from "@/utils/helpers";
-import { DEFAULT_CATEGORIES, FinancialState } from "@/types";
-import { supabase } from "@/lib/supabaseClient";
 
 const GOOGLE_SVG = (
   <svg viewBox="0 0 24 24" className="w-5 h-5">
@@ -27,62 +25,46 @@ function getInitials(n: string) {
 }
 
 function validateEmail(v: string) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
-function validatePhone(v: string) { return /^\d{10}$/.test(v.replace(/\s/g, "")); }
+function validatePhone(v: string) { return /^\d{10}$/.test(v.replace(/\D/g, "")); }
 
-function getPastDate(daysAgo: number) {
-  return new Date(Date.now() - daysAgo * 86400000).toISOString().split("T")[0];
+function formatPhone(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+91${digits}`;
+  return phone.startsWith("+") ? phone : `+${digits}`;
 }
 
-function getDemoState(): FinancialState {
-  return {
-    user: { name: "Dhruv Jain", monthlyIncome: 120000, isDemo: true },
-    balance: 275000,
-    transactions: [
-      // Food
-      { id: generateId(), type: "expense", amount: 450, category: "Food", date: getPastDate(0), description: "Zomato" },
-      { id: generateId(), type: "expense", amount: 320, category: "Food", date: getPastDate(1), description: "Swiggy" },
-      { id: generateId(), type: "expense", amount: 150, category: "Food", date: getPastDate(2), description: "Momos" },
-      { id: generateId(), type: "expense", amount: 600, category: "Food", date: getPastDate(3), description: "Cafe" },
-      
-      // Transport
-      { id: generateId(), type: "expense", amount: 120, category: "Transport", date: getPastDate(1), description: "Rapido" },
-      { id: generateId(), type: "expense", amount: 250, category: "Transport", date: getPastDate(2), description: "Uber" },
-      { id: generateId(), type: "expense", amount: 2000, category: "Transport", date: getPastDate(5), description: "Petrol" },
-      
-      // Shopping
-      { id: generateId(), type: "expense", amount: 2000, category: "Shopping", date: getPastDate(3), description: "Amazon" },
-      { id: generateId(), type: "expense", amount: 1500, category: "Shopping", date: getPastDate(6), description: "Myntra" },
-      { id: generateId(), type: "expense", amount: 3000, category: "Shopping", date: getPastDate(8), description: "Flipkart" },
-      
-      // Bills
-      { id: generateId(), type: "expense", amount: 2500, category: "Utilities", date: getPastDate(10), description: "Electricity" },
-      { id: generateId(), type: "expense", amount: 799, category: "Utilities", date: getPastDate(11), description: "Jio" },
-      { id: generateId(), type: "expense", amount: 15000, category: "Housing", date: getPastDate(15), description: "Rent" },
-      
-      // Entertainment
-      { id: generateId(), type: "expense", amount: 499, category: "Entertainment", date: getPastDate(4), description: "Netflix" },
-      { id: generateId(), type: "expense", amount: 199, category: "Entertainment", date: getPastDate(7), description: "Spotify" },
-      
-      // Other
-      { id: generateId(), type: "expense", amount: 1200, category: "Healthcare", date: getPastDate(9), description: "Gym" },
-      { id: generateId(), type: "expense", amount: 800, category: "Healthcare", date: getPastDate(12), description: "Doctor" },
-    ],
-    cards: [
-      { id: generateId(), name: "HDFC Card", network: "visa", limit: 100000, used: 35000 },
-      { id: generateId(), name: "ICICI Card", network: "mastercard", limit: 200000, used: 90000 },
-    ],
-    loans: [],
-    budgets: [],
-    goals: [
-      { id: generateId(), title: "Buy Car", targetAmount: 500000, savedAmount: 200000, deadline: getPastDate(-180) },
-      { id: generateId(), title: "Emergency Fund", targetAmount: 300000, savedAmount: 120000, deadline: getPastDate(-365) },
-      { id: generateId(), title: "Travel Fund", targetAmount: 150000, savedAmount: 40000, deadline: getPastDate(-90) }
-    ],
-    categories: DEFAULT_CATEGORIES,
-    onboarded: true,
-    theme: "dark",
-    customMappings: {}
-  };
+function maskIdentifier(id: string, isEmail: boolean) {
+  if (isEmail) {
+    const [local, domain] = id.split("@");
+    if (!local || !domain) return id;
+    return `${local.slice(0, 3)}***@${domain}`;
+  }
+  const digits = id.replace(/\D/g, "");
+  return `+91 ******${digits.slice(-4)}`;
+}
+
+// ── Upsert user into Supabase "users" table ──
+async function upsertUserRecord(userId: string, email: string) {
+  try {
+    const { data: existingUser } = await supabase
+      .from("users")
+      .select("*")
+      .eq("auth_id", userId)
+      .single();
+
+    if (!existingUser) {
+      await supabase.from("users").insert([
+        {
+          auth_id: userId,
+          email: email,
+          name: email.split("@")[0],
+        },
+      ]);
+      console.log("New user record created in DB");
+    }
+  } catch (err) {
+    console.warn("Could not upsert user record:", err);
+  }
 }
 
 // ── Component ──
@@ -91,15 +73,13 @@ export function OnboardingFlow() {
 
   // Flow state
   const [step, setStep] = useState(0); // 0=auth, 1=profile, 2=financial
-  const [authMode, setAuthMode] = useState<"signup" | "login" | "forgot">("signup");
-  const [loginMethod, setLoginMethod] = useState<"otp" | "password">("otp");
+  const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
+  const [loginType, setLoginType] = useState<"email" | "phone">("email");
   const [otpSent, setOtpSent] = useState(false);
 
   // Field state
-  const [loginId, setLoginId] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState("");
   const [income, setIncome] = useState("");
   const [balance, setBalanceVal] = useState("");
@@ -108,13 +88,12 @@ export function OnboardingFlow() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [finishing, setFinishing] = useState(false);
   const [finished, setFinished] = useState(false);
-  const [resendCooldown, setResendCooldown] = useState(0);
 
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // Resend cooldown timer
   useEffect(() => {
     if (resendCooldown <= 0) return;
     const t = setTimeout(() => setResendCooldown(c => c - 1), 1000);
@@ -123,144 +102,115 @@ export function OnboardingFlow() {
 
   if (state.onboarded) return null;
 
-  // ── Validation ──
-  const isEmail = loginId.includes("@");
-  const isValidLogin = isEmail ? validateEmail(loginId) : validatePhone(loginId);
-
   // ── Handlers ──
-  const handleSignup = async () => {
-    if (!loginId || !password || !name) {
-      alert("Please fill all fields");
-      return;
-    }
-    setLoading(true);
-    const { data, error } = await supabase.auth.signUp({
-      email: loginId,
-      password
-    });
 
-    if (error) {
-      alert(error.message);
-      setLoading(false);
-      return;
-    }
-
-    if (data?.user) {
-      await supabase.from("users").insert([
-        {
-          auth_id: data.user.id,
-          email: data.user.email,
-          name: name
-        }
-      ]);
-    }
-
-    alert("Signup successful");
-    setUser({ name, monthlyIncome: 80000 });
-    setBalance(200000);
-    completeOnboarding();
-    window.location.href = "/";
-  };
-
-  const handleLogin = async () => {
-    if (!loginId || !password) {
-      alert("Please fill all fields");
-      return;
-    }
-    setLoading(true);
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: loginId,
-      password
-    });
-
-    if (error) {
-      alert(error.message);
-      setLoading(false);
-    } else {
-      alert("Login successful");
-      try {
-        const { data: userData } = await supabase.auth.getUser();
-        if (userData?.user) {
-          const { data: profile } = await supabase
-            .from("users")
-            .select("name")
-            .eq("auth_id", userData.user.id)
-            .single();
-          
-          const finalName = profile?.name ? profile.name : "User";
-          setName(finalName);
-          setUser({ name: finalName, monthlyIncome: 80000, isDemo: false });
-        }
-      } catch (err) {
-        console.error("Error fetching user profile:", err);
-        setName("User");
-        setUser({ name: "User", monthlyIncome: 80000 });
-      }
-      setBalance(200000);
-      completeOnboarding();
-      window.location.href = "/";
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    if (!loginId) {
-      alert("Please enter your email address");
-      return;
-    }
-    setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(loginId, {
-      redirectTo: window.location.origin + "/reset-password",
-    });
-
-    if (error) {
-      alert(error.message);
-    } else {
-      alert("Password reset email sent. Please check your inbox.");
-      setAuthMode("login");
-    }
-    setLoading(false);
-  };
-
-  const handleContinueAuth = () => {
+  const handleSendOtp = async () => {
     setError("");
+    const val = identifier.trim();
+    if (!val) { setError(`Please enter your ${loginType}`); return; }
 
-    // DEMO ACCOUNT CHECK
-    if (loginId.trim() === "dhruvjain1858@gmail.com" && password === "dhruv@2592") {
-      setLoading(true);
-      setTimeout(() => {
-        setLoading(false);
-        dispatch({ type: "LOAD_STATE", payload: getDemoState() });
-      }, 1500);
-      return;
-    }
+    const isValid = loginType === "email" ? validateEmail(val) : validatePhone(val);
+    if (!isValid) { setError(`Please enter a valid ${loginType}`); return; }
 
-    if (loginId.trim() === "dhruvjain1858@gmail.com" && password !== "dhruv@2592") {
-      setError("Invalid email or password");
-      return;
-    }
-
-    if (authMode === "signup") {
-      handleSignup();
-      return;
-    }
-
-    if (authMode === "forgot") {
-      handleForgotPassword();
-      return;
-    }
-
-    if (loginMethod === "password") {
-      handleLogin();
-      return;
-    }
-
-    // OTP login mock
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const formattedId = loginType === "email" ? val : formatPhone(val);
+      console.log(`Attempting to send OTP to ${loginType}:`, formattedId, "Mode:", authMode);
+
+      // We use shouldCreateUser: true for both to avoid "User not found" errors.
+      const { error } = await supabase.auth.signInWithOtp(
+        loginType === "email"
+          ? { email: formattedId, options: { shouldCreateUser: true } }
+          : { phone: formattedId, options: { shouldCreateUser: true } }
+      );
+
+      if (error) {
+        console.error("Supabase OTP Error:", error);
+        throw error;
+      }
+
+      console.log("OTP sent successfully!");
       setOtpSent(true);
       setResendCooldown(30);
-    }, 1200);
+    } catch (err: any) {
+      console.error("Catch Error during OTP Send:", err);
+      if (err.name === 'AuthRetryableFetchError') {
+        setError("Network error: Could not reach Supabase. Please check your internet connection or disable any ad-blockers.");
+      } else {
+        setError(err.message || "Failed to send OTP");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    const code = otp.join("");
+    if (code.length < 6) { setError("Enter 6-digit code"); return; }
+
+    setLoading(true);
+    setError("");
+    try {
+      const val = identifier.trim();
+      const formattedId = loginType === "email" ? val : formatPhone(val);
+
+      const verifyType = loginType === "email"
+        ? (authMode === "signup" ? "signup" : "email")
+        : "sms";
+
+      const { data, error } = await supabase.auth.verifyOtp(
+        loginType === "email"
+          ? { email: formattedId, token: code, type: verifyType as any }
+          : { phone: formattedId, token: code, type: "sms" }
+      );
+
+      if (error) throw error;
+
+      if (data.user) {
+        await upsertUserRecord(data.user.id, data.user.email || identifier);
+        const userName = data.user.user_metadata?.full_name || data.user.email?.split("@")[0] || "User";
+        setName(userName);
+      }
+
+      setOtpSent(false);
+      setStep(1);
+    } catch (err: any) {
+      setError(err.message || "Invalid or expired OTP");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setGoogleLoading(true);
+    setError("");
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: { redirectTo: window.location.origin },
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      setGoogleLoading(false);
+      setError(err.message || "Failed to connect with Google.");
+    }
+  };
+
+  const handleFinish = async () => {
+    setFinishing(true);
+    const finalName = name.trim() || "User";
+    try {
+      await supabase.auth.updateUser({ data: { full_name: finalName } });
+      setFinished(true);
+      setTimeout(() => {
+        setUser({ name: finalName, monthlyIncome: Number(income) || 50000 });
+        setBalance(Number(balance) || 100000);
+        completeOnboarding();
+      }, 1000);
+    } catch (err: any) {
+      setError(err.message || "Failed to save profile");
+      setFinishing(false);
+    }
   };
 
   const handleOtpChange = (idx: number, val: string) => {
@@ -269,74 +219,7 @@ export function OnboardingFlow() {
     const next = [...otp];
     next[idx] = val;
     setOtp(next);
-    setError("");
     if (val && idx < 5) otpRefs.current[idx + 1]?.focus();
-  };
-
-  const handleOtpKeyDown = (idx: number, e: React.KeyboardEvent) => {
-    if (e.key === "Backspace" && !otp[idx] && idx > 0) otpRefs.current[idx - 1]?.focus();
-  };
-
-  const handleOtpPaste = (e: React.ClipboardEvent) => {
-    e.preventDefault();
-    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
-    if (!pasted) return;
-    const next = [...otp];
-    for (let i = 0; i < 6; i++) next[i] = pasted[i] || "";
-    setOtp(next);
-    const focusIdx = Math.min(pasted.length, 5);
-    otpRefs.current[focusIdx]?.focus();
-  };
-
-  const handleVerifyOtp = () => {
-    const code = otp.join("");
-    if (code.length < 6) { setError("Please enter the full 6-digit OTP"); return; }
-    if (code !== "123456") { setError("Invalid OTP. Try 123456"); return; }
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setOtpSent(false);
-
-      if (authMode === "signup") {
-        // Signup: verified → continue to profile step
-        setStep(1);
-      } else {
-        // DEMO ACCOUNT CHECK for OTP
-        if (loginId.trim() === "dhruvjain1858@gmail.com") {
-          dispatch({ type: "LOAD_STATE", payload: getDemoState() });
-          return;
-        }
-
-        // Login: verified → go straight to dashboard
-        setName("Dhruv Jain");
-        setUser({ name: "Dhruv Jain", monthlyIncome: 80000 });
-        setBalance(200000);
-        completeOnboarding();
-      }
-    }, 1200);
-  };
-
-  const handleResendOtp = () => {
-    if (resendCooldown > 0) return;
-    setOtp(["", "", "", "", "", ""]);
-    setError("");
-    setResendCooldown(30);
-  };
-
-  const handleGoogleLogin = async () => {
-    setGoogleLoading(true);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: window.location.origin,
-      },
-    });
-
-    if (error) {
-      console.error("Google login error:", error.message);
-      alert(error.message);
-      setGoogleLoading(false);
-    }
   };
 
   const handleSkip = () => {
@@ -345,86 +228,50 @@ export function OnboardingFlow() {
     completeOnboarding();
   };
 
-  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const raw = e.target.value.replace(/[^a-zA-Z\s]/g, "");
-    const words = raw.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1));
-    setName(words.join(" "));
-    setError("");
-  };
+  // ── UI Content ──
 
-  const addChip = (setter: React.Dispatch<React.SetStateAction<string>>, amt: number, cur: string) => {
-    setter(((Number(cur) || 0) + amt).toString());
-  };
+  const progressPct = ((step + 1) / 3) * 100;
+  const stepLabel = `Step ${step + 1} of 3`;
 
-  const handleFinish = () => {
-    setError("");
-    setFinishing(true);
-    setTimeout(() => {
-      setFinished(true);
-      setTimeout(() => {
-        setUser({ name: name.trim() || "Guest", monthlyIncome: Number(income) || 50000 });
-        setBalance(Number(balance) || 100000);
-        completeOnboarding();
-      }, 1000);
-    }, 1500);
-  };
-
-  // ── Progress ──
-  const progressPct = authMode === "signup" ? ((step + 1) / 3) * 100 : 100;
-  const stepLabel = authMode === "signup" ? `Step ${step + 1} of 3` : "Authentication";
-
-  // ── OTP Screen (both signup & login) ──
   if (otpSent) {
     return (
-      <Shell progressPct={authMode === "signup" ? 33 : 100} stepLabel="Verify OTP">
+      <Shell progressPct={33} stepLabel="Verify OTP">
         <StepIcon icon={<KeyRound className="w-7 h-7" />} />
         <h1 className="text-2xl md:text-3xl font-bold text-center tracking-tight">Enter verification code</h1>
-        <p className="text-muted-foreground text-center mt-1.5 text-sm">Sent to <span className="text-foreground font-medium">{loginId}</span></p>
-        <motion.div animate={error ? { x: [-4, 4, -4, 4, 0] } : {}} transition={{ duration: 0.3 }}>
-          <div className="flex justify-center gap-2.5 mt-8" onPaste={handleOtpPaste}>
-            {otp.map((d, i) => (
-              <input key={i} ref={el => { otpRefs.current[i] = el; }} type="text" inputMode="numeric" maxLength={1}
-                value={d} onChange={e => handleOtpChange(i, e.target.value)} onKeyDown={e => handleOtpKeyDown(i, e)}
-                className={`w-11 h-13 md:w-12 md:h-14 text-center text-xl font-bold rounded-xl border ${d ? "border-primary bg-primary/5" : "border-border"} bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all`}
-              />
-            ))}
-          </div>
-          {error && <p className="text-danger text-sm mt-3 text-center bg-danger/10 py-2 rounded-lg border border-danger/20">{error}</p>}
-        </motion.div>
+        <p className="text-muted-foreground text-center mt-1.5 text-sm">Sent to <span className="text-foreground font-medium">{maskIdentifier(identifier, loginType === "email")}</span></p>
+        <div className="flex justify-center gap-2.5 mt-8">
+          {otp.map((d, i) => (
+            <input key={i} ref={el => { otpRefs.current[i] = el; }} type="text" inputMode="numeric" maxLength={1}
+              value={d} onChange={e => handleOtpChange(i, e.target.value)}
+              onKeyDown={e => e.key === "Backspace" && !otp[i] && i > 0 && otpRefs.current[i - 1]?.focus()}
+              className={`w-11 h-13 md:w-12 md:h-14 text-center text-xl font-bold rounded-xl border ${d ? "border-primary bg-primary/5" : "border-border"} bg-background focus:outline-none focus:ring-2 focus:ring-primary transition-all`}
+            />
+          ))}
+        </div>
+        {error && <p className="text-danger text-sm mt-4 text-center bg-danger/10 py-2 rounded-lg border border-danger/20">{error}</p>}
         <button onClick={handleVerifyOtp} disabled={loading || otp.join("").length < 6}
-          className="w-full mt-6 py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium flex items-center justify-center gap-2 transition-all hover:shadow-lg hover:shadow-blue-500/25 hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none">
-          {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Verify {authMode === "login" ? "& Login" : "& Continue"} <ArrowRight className="w-4 h-4" /></>}
+          className="w-full mt-6 py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium flex items-center justify-center gap-2 transition-all hover:shadow-lg hover:shadow-blue-500/25 hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50">
+          {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Verify & Continue <ArrowRight className="w-4 h-4" /></>}
         </button>
         <div className="flex items-center justify-between mt-4">
-          <button onClick={() => { setOtpSent(false); setOtp(["","","","","",""]); setError(""); }}
-            className="text-xs text-muted-foreground hover:text-primary transition-colors">
-            ← Back
-          </button>
-          <button onClick={handleResendOtp} disabled={resendCooldown > 0}
-            className="text-xs text-muted-foreground hover:text-primary transition-colors disabled:opacity-40 disabled:pointer-events-none">
-            {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend OTP"}
-          </button>
+          <button onClick={() => { setOtpSent(false); setOtp(["", "", "", "", "", ""]); setError(""); }} className="text-xs text-muted-foreground hover:text-primary transition-colors">← Back</button>
+          <button onClick={handleSendOtp} disabled={resendCooldown > 0} className="text-xs text-muted-foreground hover:text-primary transition-colors disabled:opacity-40">{resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend OTP"}</button>
         </div>
       </Shell>
     );
   }
 
-  // ── Step 0: Auth ──
   const authContent = (
     <div className="space-y-4">
-      {/* Tabs */}
-      {authMode !== "forgot" && (
-        <div className="flex rounded-xl bg-muted/50 p-1 mb-2">
-          {(["signup", "login"] as const).map(m => (
-            <button key={m} onClick={() => { setAuthMode(m); setError(""); setOtpSent(false); }}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${authMode === m ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-              {m === "signup" ? "Sign Up" : "Login"}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="flex rounded-xl bg-muted/50 p-1 mb-2">
+        {(["signup", "login"] as const).map(m => (
+          <button key={m} onClick={() => { setAuthMode(m); setError(""); setOtpSent(false); }}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${authMode === m ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+            {m === "signup" ? "Sign Up" : "Login"}
+          </button>
+        ))}
+      </div>
 
-      {/* Smart Input */}
       {authMode === "signup" && (
         <div className="relative group">
           <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors z-10 ${name ? "text-primary" : "text-muted-foreground"}`}>
@@ -439,110 +286,61 @@ export function OnboardingFlow() {
         </div>
       )}
 
+      <div className="flex gap-4 border-b border-border/40 mb-2">
+        {(["email", "phone"] as const).map(t => (
+          <button key={t} onClick={() => { setLoginType(t); setIdentifier(""); setError(""); }}
+            className={`pb-2 text-sm font-medium capitalize transition-all border-b-2 ${loginType === t ? "border-primary text-primary" : "border-transparent text-muted-foreground"}`}>
+            {t}
+          </button>
+        ))}
+      </div>
       <div className="relative group">
-        <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors z-10 ${loginId ? "text-primary" : "text-muted-foreground"}`}>
-          {isEmail ? <Mail className="w-4 h-4" /> : loginId.length > 0 ? <Phone className="w-4 h-4" /> : <User className="w-4 h-4" />}
+        <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors z-10 ${identifier ? "text-primary" : "text-muted-foreground"}`}>
+          {loginType === "email" ? <Mail className="w-4 h-4" /> : <Phone className="w-4 h-4" />}
         </div>
-        <input type="text" value={loginId} onChange={e => { setLoginId(e.target.value); setError(""); }}
-          className={`w-full bg-background/80 border ${error && !loginId ? "border-danger" : "border-border/60"} rounded-xl pl-11 pr-4 pt-5 pb-2 text-base focus:outline-none focus:ring-2 focus:ring-primary/80 focus:border-transparent transition-all`}
+        <input type="text" value={identifier} onChange={e => { setIdentifier(e.target.value); setError(""); }}
+          className={`w-full bg-background/80 border ${error && !identifier ? "border-danger" : "border-border/60"} rounded-xl pl-11 pr-4 pt-5 pb-2 text-base focus:outline-none focus:ring-2 focus:ring-primary/80 focus:border-transparent transition-all`}
         />
-        <label className={`absolute left-11 transition-all duration-200 pointer-events-none ${loginId ? "top-1.5 text-[10px] text-primary font-medium" : "top-1/2 -translate-y-1/2 text-sm text-muted-foreground"}`}>
-          Email Address
+        <label className={`absolute left-11 transition-all duration-200 pointer-events-none ${identifier ? "top-1.5 text-[10px] text-primary font-medium" : "top-1/2 -translate-y-1/2 text-sm text-muted-foreground"}`}>
+          {loginType === "email" ? "Email Address" : "Phone Number"}
         </label>
       </div>
-
-      {/* Login: password option */}
-      {authMode === "login" && (
-        <>
-          <div className="flex rounded-lg bg-muted/30 p-0.5 text-xs">
-            {(["otp", "password"] as const).map(m => (
-              <button key={m} onClick={() => { setLoginMethod(m); setError(""); }}
-                className={`flex-1 py-1.5 rounded-md font-medium transition-all ${loginMethod === m ? "bg-background/80 shadow-sm text-foreground" : "text-muted-foreground"}`}>
-                {m === "otp" ? "OTP Login" : "Password"}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* Password field for Signup OR Login (if password method) */}
-      {(authMode === "signup" || (authMode === "login" && loginMethod === "password")) && (
-        <div className="relative group">
-          <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors z-10 ${password ? "text-primary" : "text-muted-foreground"}`}>
-            <Lock className="w-4 h-4" />
-          </div>
-          <input type={showPassword ? "text" : "password"} value={password} onChange={e => { setPassword(e.target.value); setError(""); }}
-            placeholder="Enter password"
-            className="w-full bg-background/80 border border-border/60 rounded-xl pl-11 pr-12 py-3.5 text-base focus:outline-none focus:ring-2 focus:ring-primary/80 focus:border-transparent transition-all"
-          />
-          <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
-            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-          </button>
-        </div>
-      )}
-
-      {authMode === "login" && loginMethod === "password" && (
-        <div className="flex justify-end">
-          <button onClick={() => setAuthMode("forgot")} className="text-[10px] text-muted-foreground hover:text-primary transition-colors">
-            Forgot Password?
-          </button>
-        </div>
-      )}
-
-      {/* CTA */}
-      <button onClick={authMode === "signup" ? handleSignup : (authMode === "forgot" ? handleForgotPassword : (loginMethod === "password" ? handleLogin : handleContinueAuth))} disabled={loading || !loginId.trim() || (authMode === "signup" && (!name.trim() || !password.trim()))}
-        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium flex items-center justify-center gap-2 transition-all hover:shadow-lg hover:shadow-blue-500/25 hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none">
-        {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Verifying...</> : <>{authMode === "signup" ? "Sign Up" : (authMode === "forgot" ? "Send Reset Link" : (loginMethod === "password" ? "Login" : "Send OTP"))} <ArrowRight className="w-4 h-4" /></>}
+      <button onClick={handleSendOtp} disabled={loading || !identifier.trim()}
+        className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium flex items-center justify-center gap-2 transition-all hover:shadow-lg hover:shadow-blue-500/25 hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50">
+        {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</> : <>Send OTP <ArrowRight className="w-4 h-4" /></>}
       </button>
-
-      {/* Divider */}
       <div className="relative py-3">
         <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-border/40" /></div>
         <div className="relative flex justify-center"><span className="bg-background px-3 text-[10px] text-muted-foreground uppercase tracking-widest">Or</span></div>
       </div>
-
-      {/* Google */}
       <button onClick={handleGoogleLogin} disabled={googleLoading}
-        className="w-full py-3.5 rounded-xl border border-border/60 hover:bg-white/5 transition-all font-medium flex items-center justify-center gap-3 disabled:opacity-60 disabled:pointer-events-none">
+        className="w-full py-3.5 rounded-xl border border-border/60 hover:bg-white/5 transition-all font-medium flex items-center justify-center gap-3 disabled:opacity-60">
         {googleLoading ? <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /> : GOOGLE_SVG}
-        {googleLoading ? "Verifying..." : "Continue with Google"}
+        {googleLoading ? "Redirecting..." : "Continue with Google"}
       </button>
-
-      {/* Trust */}
       <div className="pt-3 flex flex-col items-center gap-1.5">
         <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Lock className="w-3 h-3 text-success" /> Bank-grade security</p>
         <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Shield className="w-3 h-3 text-success" /> Your data is encrypted & never shared</p>
       </div>
-
-      {/* Toggle + Skip */}
       <div className="flex flex-col items-center gap-2 pt-2">
-        <button onClick={() => { setAuthMode(authMode === "signup" ? "login" : "signup"); setError(""); }}
-          className="text-xs text-muted-foreground hover:text-primary transition-colors">
-          {authMode === "forgot" ? "Back to Login" : (authMode === "signup" ? "Already have an account? Login" : "New here? Create account")}
-        </button>
-        <button onClick={handleSkip} className="text-[11px] text-muted-foreground/60 hover:text-primary transition-colors underline underline-offset-2">
-          Skip & explore demo
-        </button>
+        <button onClick={handleSkip} className="text-[11px] text-muted-foreground/60 hover:text-primary transition-colors underline underline-offset-2">Skip & explore demo</button>
       </div>
     </div>
   );
 
-  // ── Step 1: Profile ──
   const profileContent = (
     <div className="space-y-5">
       <div className="relative group">
         <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors z-10 ${name ? "text-primary" : "text-muted-foreground"}`}>
           <User className="w-4 h-4" />
         </div>
-        <input type="text" value={name} onChange={handleNameChange}
+        <input type="text" value={name} onChange={e => setName(e.target.value)}
           className={`w-full bg-background/80 border ${error ? "border-danger" : "border-border/60"} rounded-xl pl-11 pr-4 pt-5 pb-2 text-base focus:outline-none focus:ring-2 focus:ring-primary/80 focus:border-transparent transition-all`}
         />
         <label className={`absolute left-11 transition-all duration-200 pointer-events-none ${name ? "top-1.5 text-[10px] text-primary font-medium" : "top-1/2 -translate-y-1/2 text-sm text-muted-foreground"}`}>
           Your Full Name
         </label>
       </div>
-
-      {/* Live Preview */}
       <div className="p-4 rounded-xl border border-white/10 bg-gradient-to-br from-blue-500/5 to-purple-500/5 backdrop-blur-sm">
         <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest mb-3">Dashboard Preview</p>
         <div className="flex items-center gap-3">
@@ -556,7 +354,6 @@ export function OnboardingFlow() {
           </div>
         </div>
       </div>
-
       <div className="flex gap-3 pt-2">
         <button onClick={() => setStep(0)} className="flex-1 py-3 rounded-xl border border-border/60 hover:bg-white/5 transition-colors font-medium text-sm">Back</button>
         <button onClick={() => { if (!name.trim()) { setError("Please enter your name"); return; } setError(""); setStep(2); }}
@@ -567,39 +364,20 @@ export function OnboardingFlow() {
     </div>
   );
 
-  // ── Step 2: Financial ──
   const financialContent = (
     <div className="space-y-5">
       <div className="space-y-2">
         <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest ml-1">Monthly Income</label>
-        <CurrencyInput value={income} onChange={v => { setIncome(v); setError(""); }} placeholder="50,000" large />
-        <div className="flex gap-2 mt-1.5">
-          {[10000, 50000, 100000].map(a => (
-            <button key={a} onClick={() => addChip(setIncome, a, income)}
-              className="text-[11px] bg-white/5 hover:bg-primary/10 hover:text-primary border border-white/10 rounded-full px-3 py-1 transition-all">
-              +{a >= 100000 ? "1L" : `${a / 1000}K`}
-            </button>
-          ))}
-        </div>
+        <CurrencyInput value={income} onChange={setIncome} placeholder="50,000" large />
       </div>
-
       <div className="space-y-2">
         <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest ml-1">Current Bank Balance</label>
-        <CurrencyInput value={balance} onChange={v => setBalanceVal(v)} placeholder="1,00,000" large />
-        <div className="flex gap-2 mt-1.5">
-          {[10000, 50000, 100000].map(a => (
-            <button key={a} onClick={() => addChip(setBalanceVal, a, balance)}
-              className="text-[11px] bg-white/5 hover:bg-primary/10 hover:text-primary border border-white/10 rounded-full px-3 py-1 transition-all">
-              +{a >= 100000 ? "1L" : `${a / 1000}K`}
-            </button>
-          ))}
-        </div>
+        <CurrencyInput value={balance} onChange={setBalanceVal} placeholder="1,00,000" large />
       </div>
-
       <div className="flex gap-3 pt-2">
         <button onClick={() => setStep(1)} disabled={finishing} className="flex-1 py-3 rounded-xl border border-border/60 hover:bg-white/5 transition-colors font-medium text-sm disabled:opacity-50">Back</button>
         <button onClick={handleFinish} disabled={finishing}
-          className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium flex items-center justify-center gap-2 transition-all hover:shadow-[0_0_25px_rgba(59,130,246,0.4)] hover:scale-[1.01] active:scale-[0.98] disabled:opacity-80 disabled:pointer-events-none text-sm">
+          className="flex-[2] py-3 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium flex items-center justify-center gap-2 transition-all hover:shadow-[0_0_25px_rgba(59,130,246,0.4)] hover:scale-[1.01] active:scale-[0.98] disabled:opacity-80 text-sm">
           {finishing ? (finished ? <><CheckCircle2 className="w-5 h-5" /> Welcome!</> : <><Loader2 className="w-5 h-5 animate-spin" /> Setting up...</>) : <>Get Started <CheckCircle2 className="w-4 h-4" /></>}
         </button>
       </div>
@@ -631,13 +409,11 @@ export function OnboardingFlow() {
   );
 }
 
-// ── Shell wrapper ──
 function Shell({ children, progressPct, stepLabel }: { children: React.ReactNode; progressPct: number; stepLabel: string }) {
   return (
     <div className="fixed inset-0 z-[100] bg-background overflow-y-auto">
       <div className="fixed inset-0 z-[-1] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/20 via-background to-background" />
       <div className="min-h-[100dvh] flex flex-col items-center px-4 py-6 pb-28">
-        {/* Progress */}
         <div className="w-full max-w-md mb-8">
           <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
             <motion.div initial={{ width: 0 }} animate={{ width: `${progressPct}%` }} transition={{ duration: 0.5, ease: "easeInOut" }}
@@ -645,8 +421,6 @@ function Shell({ children, progressPct, stepLabel }: { children: React.ReactNode
           </div>
           <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest text-center mt-2">{stepLabel}</p>
         </div>
-
-        {/* Card */}
         <div className="w-full max-w-md rounded-2xl border border-white/[0.06] bg-card/60 backdrop-blur-xl p-6 md:p-8 shadow-2xl shadow-black/20">
           {children}
         </div>
@@ -655,7 +429,6 @@ function Shell({ children, progressPct, stepLabel }: { children: React.ReactNode
   );
 }
 
-// ── Step icon ──
 function StepIcon({ icon }: { icon: React.ReactNode }) {
   return (
     <div className="flex items-center justify-center mb-5">
