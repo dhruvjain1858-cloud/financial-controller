@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useFinancial } from "@/context/FinancialContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { Mail, Phone, Lock, ArrowRight, CheckCircle2, Shield, User, Loader2, Eye, EyeOff, KeyRound } from "lucide-react";
-import { supabase } from "@/utils/supabaseClient";
+import { supabase } from "@/lib/supabaseClient";
 import { CurrencyInput } from "@/components/CurrencyInput";
 
 const GOOGLE_SVG = (
