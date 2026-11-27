@@ -150,12 +150,15 @@ export function financialReducer(state: FinancialState, action: Action): Financi
       };
     }
     case "PAY_CARD_BILL": {
+      // Pay at most what is owed, so an overpayment cannot vanish from the books.
+      const card = state.cards.find((c) => c.id === action.payload.cardId);
+      if (!card) return state;
+      const paid = Math.min(action.payload.amount, card.used);
+      if (paid <= 0) return state;
       return {
         ...state,
-        balance: state.balance - action.payload.amount,
-        cards: state.cards.map((c) => 
-          c.id === action.payload.cardId ? { ...c, used: Math.max(0, c.used - action.payload.amount) } : c
-        ),
+        balance: state.balance - paid,
+        cards: state.cards.map((c) => (c.id === card.id ? { ...c, used: c.used - paid } : c)),
       };
     }
 

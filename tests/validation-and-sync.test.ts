@@ -26,6 +26,20 @@ describe("validation", () => {
     if (!r.ok) expect(r.error).toMatch(/remaining/);
   });
 
+  it("rejects amounts the database cannot store", () => {
+    expect(validateTransaction({ ...tx, amount: 999_999_999_999.99 }).ok).toBe(true);
+    expect(validateTransaction({ ...tx, amount: 1e12 }).ok).toBe(false);
+  });
+
+  it("rejects an EMI that does not cover the monthly interest", () => {
+    // 10,00,000 at 12% = 10,000 interest a month
+    const loan = { id: "l", name: "L", totalAmount: 1000000, remaining: 1000000, interest: 12, monthsRemaining: 60 };
+    const r = validateLoan({ ...loan, emi: 9000 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/monthly interest/);
+    expect(validateLoan({ ...loan, emi: 22244 }).ok).toBe(true);
+  });
+
   it("drops corrupt saved rows and dangling card links instead of crashing", () => {
     const { state, dropped } = sanitizeState({
       balance: 100,
@@ -39,6 +53,11 @@ describe("validation", () => {
     expect(state.transactions).toHaveLength(1);
     expect(state.transactions[0].creditCardId).toBeUndefined();
     expect(state.cards).toHaveLength(0);
+  });
+
+  it("keeps an already-saved loan that predates the EMI rule", () => {
+    const old = { id: "l", name: "Old", totalAmount: 1000000, remaining: 1000000, emi: 9000, interest: 12, monthsRemaining: 60 };
+    expect(sanitizeState({ loans: [old] }).state.loans).toHaveLength(1);
   });
 
   it("returns a safe default for garbage input", () => {

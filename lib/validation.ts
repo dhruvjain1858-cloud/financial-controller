@@ -9,7 +9,9 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").refine
   (s) => !Number.isNaN(Date.parse(s)),
   "Invalid date"
 );
-const money = z.number().finite();
+// numeric(14,2) in Postgres holds values below 10^12; larger input would fail at sync time.
+export const MAX_AMOUNT = 999_999_999_999.99;
+const money = z.number().finite().max(MAX_AMOUNT, "Amount is too large").min(-MAX_AMOUNT, "Amount is too large");
 const positive = money.positive("Must be greater than 0");
 const nonNegative = money.nonnegative("Cannot be negative");
 
@@ -36,21 +38,28 @@ export const cardSchema = z.object({
   used: nonNegative,
 });
 
-export const loanSchema = z
-  .object({
-    id: z.string().min(1),
-    name: z.string().trim().min(1).max(60),
-    totalAmount: positive,
-    remaining: nonNegative,
-    emi: positive,
-    interest: money.min(0).max(100),
-    monthsRemaining: z.number().int().nonnegative(),
-    lastPaidMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
-  })
-  .refine((l) => l.remaining <= l.totalAmount, {
-    message: "Remaining cannot exceed the total amount",
-    path: ["remaining"],
-  });
+const loanShape = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1).max(60),
+  totalAmount: positive,
+  remaining: nonNegative,
+  emi: positive,
+  interest: money.min(0).max(100),
+  monthsRemaining: z.number().int().nonnegative(),
+  lastPaidMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+});
+
+/** Rules for loans already saved: never drop a user's existing data for a newer, stricter rule. */
+const storedLoanSchema = loanShape.refine((l) => l.remaining <= l.totalAmount, {
+  message: "Remaining cannot exceed the total amount",
+  path: ["remaining"],
+});
+
+/** Rules for new or edited loans. */
+export const loanSchema = storedLoanSchema.refine((l) => l.remaining === 0 || l.emi > (l.remaining * l.interest) / 1200, {
+  message: "EMI must be more than the monthly interest, or the loan never reduces",
+  path: ["emi"],
+});
 
 export const budgetSchema = z.object({
   id: z.string().min(1),
@@ -119,7 +128,7 @@ export function sanitizeState(raw: unknown): { state: FinancialState; dropped: n
     balance: typeof input.balance === "number" && Number.isFinite(input.balance) ? input.balance : 0,
     transactions,
     cards,
-    loans: keep(input.loans, validateLoan),
+    loans: keep(input.loans, (v) => check<Loan>(storedLoanSchema as z.ZodType<Loan>, v)),
     budgets: keep(input.budgets, validateBudget),
     goals: keep(input.goals, validateGoal),
     categories:

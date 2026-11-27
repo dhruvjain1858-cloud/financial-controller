@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatCurrency } from "@/utils/helpers";
 import { Modal } from "@/components/Modal";
 import { useFinancial } from "@/context/FinancialContext";
 import { CurrencyInput } from "@/components/CurrencyInput";
@@ -44,6 +45,11 @@ export function PayCardBillModal({ isOpen, onClose }: Props) {
     
     const card = state.cards.find(c => c.id === selectedCardId);
     if (!card) return;
+
+    if (num > card.used) {
+      setError(`You only owe ${formatCurrency(card.used)} on this card.`);
+      return;
+    }
 
     if (num > state.balance) {
       setError("Insufficient bank balance to pay this bill.");

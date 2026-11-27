@@ -43,6 +43,17 @@ export function todayISO(): string {
   return localISODate();
 }
 
+/**
+ * Whole days from today to a YYYY-MM-DD date, in LOCAL time; negative once it has passed.
+ * (new Date("YYYY-MM-DD") is UTC midnight, which shifts the count by a day in India.)
+ */
+export function daysFromToday(dateString: string, today: Date = new Date()): number {
+  const [y, m, d] = dateString.split("-").map(Number);
+  const target = Date.UTC(y, m - 1, d);
+  const start = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.round((target - start) / 86_400_000);
+}
+
 export function daysUntil(dateString: string): number {
   const target = new Date(dateString);
   const now = new Date();

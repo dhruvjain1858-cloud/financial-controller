@@ -37,6 +37,13 @@ describe("balance and card accounting", () => {
     expect(s.transactions).toHaveLength(0);
   });
 
+  it("an overpaid card bill only takes what is owed", () => {
+    let s = financialReducer(base(), { type: "UPDATE_CARD", payload: { id: "c1", name: "A", network: "Visa", limit: 50000, used: 2000 } });
+    s = financialReducer(s, { type: "PAY_CARD_BILL", payload: { cardId: "c1", amount: 5000 } });
+    expect(s.balance).toBe(8000);
+    expect(s.cards[0].used).toBe(0);
+  });
+
   it("paying a card bill moves money from balance to the card", () => {
     let s = financialReducer(base(), { type: "UPDATE_CARD", payload: { id: "c1", name: "A", network: "Visa", limit: 50000, used: 2000 } });
     s = financialReducer(s, { type: "PAY_CARD_BILL", payload: { cardId: "c1", amount: 1500 } });

@@ -19,7 +19,7 @@ export function EditProfileModal({ isOpen, onClose }: Props) {
   const handleSubmit = () => {
     if (!name.trim()) { setError("Name is required"); return; }
     const inc = Number(income);
-    if (!inc || inc <= 0) { setError("Enter a valid income"); return; }
+    if (income.trim() === "" || !Number.isFinite(inc) || inc < 0) { setError("Enter a valid income (0 is fine)"); return; }
     setUser({ name: name.trim(), monthlyIncome: inc });
     onClose();
   };

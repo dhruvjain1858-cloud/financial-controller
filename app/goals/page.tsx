@@ -1,7 +1,7 @@
 "use client";
 
 import { Card } from "@/components/Card";
-import { formatCurrency, daysUntil, cn } from "@/utils/helpers";
+import { formatCurrency, cn, daysFromToday } from "@/utils/helpers";
 import { Target, Plus, Trash2, CheckCircle2 } from "lucide-react";
 import { useFinancial } from "@/context/FinancialContext";
 import { AddGoalModal } from "@/components/modals/AddGoalModal";
@@ -60,7 +60,7 @@ export default function GoalsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {state.goals.map((goal, i) => {
             const pct = Math.min(100, (goal.savedAmount / goal.targetAmount) * 100);
-            const days = daysUntil(goal.deadline);
+            const days = goal.deadline ? daysFromToday(goal.deadline) : Number.POSITIVE_INFINITY;
             const isComplete = goal.savedAmount >= goal.targetAmount;
             const remainingAmount = goal.targetAmount - goal.savedAmount;
             
@@ -106,7 +106,7 @@ export default function GoalsPage() {
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="text-xs text-muted-foreground flex items-center gap-1">
                             <Clock className="w-3 h-3" />
-                            {days > 0 ? `${days} days left` : isComplete ? "Done" : "Passed"}
+                            {!Number.isFinite(days) ? "No deadline" : days > 0 ? `${days} days left` : isComplete ? "Done" : "Passed"}
                           </span>
                           <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full font-medium", statusColor)}>
                             {status}
@@ -116,12 +116,12 @@ export default function GoalsPage() {
                     </div>
                     <div className="flex items-center gap-1">
                       {!isComplete && days >= 0 && (
-                        <button onClick={() => setAddFundsGoal(goal.id)}
+                        <button onClick={() => setAddFundsGoal(goal.id)} aria-label={`Add funds to ${goal.title}`}
                           className="p-1.5 hover:bg-success/10 rounded-lg transition-colors text-muted-foreground hover:text-success">
                           <Plus className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <button onClick={() => deleteGoal(goal.id)}
+                      <button onClick={() => deleteGoal(goal.id)} aria-label={`Delete ${goal.title}`}
                         className="p-1.5 hover:bg-danger/10 rounded-lg transition-colors text-muted-foreground hover:text-danger">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
