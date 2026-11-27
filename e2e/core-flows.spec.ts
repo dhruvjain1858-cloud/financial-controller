@@ -72,7 +72,7 @@ test("a duplicate budget is rejected with a visible message", async ({ page }) =
 
 test("CSV import books credits as income and debits as expenses", async ({ page }) => {
   await open(page, "/transactions");
-  await page.getByRole("button", { name: "Import", exact: true }).click();
+  await page.getByRole("button", { name: "Import CSV" }).click();
   const csv = "Txn Date,Narration,Withdrawal Amt,Deposit Amt\n05/11/2026,REFUND AMAZON,,1200\n06/11/2026,UBER TRIP,350,\n";
   await page.locator("input[type=file]").setInputFiles({ name: "statement.csv", mimeType: "text/csv", buffer: Buffer.from(csv) });
   await expect(page.getByText("REFUND AMAZON")).toBeVisible();
@@ -133,4 +133,47 @@ test("affordability check accounts for EMIs still due", async ({ page }) => {
   await expect(page.getByText("Not Recommended", { exact: true })).toBeVisible();
   await page.getByLabel("Purchase amount").fill("1000");
   await expect(page.getByText("Safe Spend", { exact: true })).toBeVisible();
+});
+
+test("phones can reach every page and the affordability check", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 740 });
+  await open(page);
+  for (const name of ["Goals", "Credit Cards", "Insights", "Alerts"]) {
+    await page.getByRole("button", { name: "More" }).click();
+    await page.locator("#mobile-more-menu").getByRole("link", { name }).click();
+    await expect(page.locator("main h1")).toBeVisible();
+  }
+  await page.getByRole("button", { name: "Affordability" }).click();
+  await expect(page.getByLabel("Purchase amount")).toBeVisible();
+});
+
+test("account pages explain that sign-in is not configured instead of failing", async ({ page }) => {
+  for (const path of ["/auth", "/forgot-password", "/reset-password", "/verify-otp?email=a@b.co"]) {
+    await page.goto(path);
+    await expect(page.getByRole("heading", { name: "Accounts are not set up here" })).toBeVisible();
+  }
+});
+
+test("a card bill cannot be overpaid and a goal cannot be dated in the past", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: "Pay", exact: true }).click();
+  await page.getByRole("dialog").getByPlaceholder("0").fill("40000"); // only 30,000 is owed
+  await page.getByRole("dialog").getByRole("button", { name: /^Pay/ }).last().click();
+  await expect(page.getByText(/You only owe ₹30,000/)).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.goto("/goals");
+  await page.getByRole("button", { name: "Add Goal" }).first().click();
+  await page.getByRole("dialog").getByPlaceholder("e.g., Emergency Fund").fill("Old goal");
+  await page.getByRole("dialog").getByPlaceholder("1,00,000").fill("1000");
+  await page.getByRole("dialog").locator("input[type=date]").fill("2020-01-01");
+  await page.getByRole("dialog").getByRole("button", { name: /Add|Save|Create/ }).last().click();
+  await expect(page.getByText("The deadline cannot be in the past")).toBeVisible();
+});
+
+test("security headers are sent", async ({ request }) => {
+  const res = await request.get("/");
+  expect(res.headers()["x-frame-options"]).toBe("DENY");
+  expect(res.headers()["x-content-type-options"]).toBe("nosniff");
+  expect(res.headers()["x-powered-by"]).toBeUndefined();
 });

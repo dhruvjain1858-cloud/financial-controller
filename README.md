@@ -48,7 +48,7 @@ React UI ──▶ FinancialContext (useReducer: single source of truth for bala
 
 - **Sync.** After every change, `planSync` diffs the last state confirmed by the server against the new state. It upserts parents before children (cards before transactions) and deletes in the reverse order. Failed writes are kept and retried; the status bar shows "Saved to your account", "Saving…" or a retry prompt.
 - **First sign-in.** If the account is empty, data already in the browser is uploaded once.
-- **Security.** The client never sends `user_id`. Postgres fills it from `auth.uid()`, and every policy limits reads and writes to the caller's own rows. A transaction can only reference a card owned by the same user (composite foreign key).
+- **Security.** Responses send `X-Frame-Options: DENY`, `nosniff`, a strict referrer policy and a restrictive permissions policy. The client never sends `user_id`. Postgres fills it from `auth.uid()`, and every policy limits reads and writes to the caller's own rows. A transaction can only reference a card owned by the same user (composite foreign key).
 
 ## Database
 
@@ -74,14 +74,18 @@ npm run dev
 
 | Command | What it checks |
 | --- | --- |
-| `npm test` | 59 unit tests: balance, EMI split and safe-limit maths, affordability, alerts and thresholds, reducer accounting (cards, EMI payments), CSV parsing and export, date formats, categorisation, validation, sync planning, row mapping |
+| `npm test` | 63 unit tests: balance, EMI split and safe-limit maths, affordability, alerts and thresholds, reducer accounting (cards, EMI payments), CSV parsing and export, date formats, categorisation, validation, sync planning, row mapping |
 | `npm run test:db` | Applies the migration to a scratch Postgres and runs RLS tests (other users cannot read, update, delete or impersonate; anonymous sees nothing; invalid rows rejected), then replays sync plans against the real schema |
-| `npx playwright test` | 8 browser tests on a production build: dashboard figures, quick add → budget alert, duplicate-budget rejection, CSV import of credits and debits, paying an EMI, affordability, first-visit onboarding, sample data |
+| `npx playwright test` | 12 browser tests on a production build: dashboard figures, quick add → budget alert, duplicate-budget rejection, CSV import of credits and debits, paying an EMI, affordability, first-visit onboarding, sample data, mobile navigation, account pages without Supabase, overpayment and past-deadline guards, security headers |
 | `npm run typecheck`, `npm run lint` | TypeScript and ESLint, both clean |
 
 `test:db` needs `DATABASE_URL` pointing at a **scratch** database (it is dropped and recreated). CI runs all of the above against a Postgres 16 service.
 
 ## Known limitations
+
+- Not yet verified against a live Supabase project: sign-in emails, Google sign-in redirects and PostgREST writes. GitHub sign-in on `/auth` works only if the GitHub provider is enabled in Supabase.
+- Signing in on a device whose account already has data loads the account's data; anything entered on that device before signing in is not merged.
+- Deleting a transaction, card, loan, budget or goal is immediate (no undo).
 
 - The Supabase calls in `supabaseRepo.ts` have not been run against a live Supabase project in CI. The schema, RLS and sync plans are tested on plain Postgres with a stand-in for `auth.uid()` (`supabase/tests/supabase_shim.sql`).
 - Sync is last-write-wins per row. Editing on two devices at once can overwrite one device's change to the same row.
