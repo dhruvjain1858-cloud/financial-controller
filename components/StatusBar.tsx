@@ -1,6 +1,7 @@
 "use client";
 
 import { useFinancial } from "@/context/FinancialContext";
+import { initialState } from "@/types";
 
 const LABEL = {
   local: "Saved in this browser only",
@@ -12,13 +13,21 @@ const LABEL = {
 
 /** Shows where data is stored, sync failures (with retry) and rejected input. */
 export function StatusBar() {
-  const { syncStatus, syncError, retrySync, actionError, clearActionError } = useFinancial();
+  const { state, dispatch, syncStatus, syncError, retrySync, actionError, clearActionError } = useFinancial();
   return (
     <div className="space-y-2 mb-4" aria-live="polite">
       {actionError && (
         <div role="alert" data-testid="action-error" className="flex justify-between gap-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
           <span>Not saved: {actionError}</span>
           <button onClick={clearActionError} className="font-medium underline">Dismiss</button>
+        </div>
+      )}
+      {state.user.isDemo && (
+        <div data-testid="demo-banner" className="flex justify-between gap-3 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary">
+          <span>You are viewing sample data.</span>
+          <button onClick={() => dispatch({ type: "LOAD_STATE", payload: { ...initialState } })} className="font-medium underline">
+            Start with my own data
+          </button>
         </div>
       )}
       {syncStatus === "error" && (

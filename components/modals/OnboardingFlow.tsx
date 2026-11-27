@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { useFinancial } from "@/context/FinancialContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { Mail, Phone, Lock, ArrowRight, CheckCircle2, Shield, User, Loader2, KeyRound } from "lucide-react";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
+import { buildDemoState } from "@/lib/demoData";
 import { errorMessage, errorName } from "@/utils/errors";
 import { CurrencyInput } from "@/components/CurrencyInput";
 
@@ -69,7 +70,7 @@ async function upsertUserRecord(userId: string, email: string) {
 
 // ── Component ──
 export function OnboardingFlow() {
-  const { state, setUser, setBalance, completeOnboarding } = useFinancial();
+  const { state, dispatch, setUser, setBalance, completeOnboarding } = useFinancial();
 
   // Flow state
   const [step, setStep] = useState(0); // 0=auth, 1=profile, 2=financial
@@ -93,6 +94,19 @@ export function OnboardingFlow() {
   const [finished, setFinished] = useState(false);
 
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Already signed in (e.g. back from Google OAuth) but not onboarded: go straight to the profile step.
+  useEffect(() => {
+    if (!isSupabaseConfigured || state.onboarded) return;
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data }) => {
+      const user = data.session?.user;
+      if (cancelled || !user) return;
+      setName((current) => current || (user.user_metadata?.full_name as string | undefined) || "");
+      setStep((s) => (s === 0 ? 1 : s));
+    });
+    return () => { cancelled = true; };
+  }, [state.onboarded]);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -195,14 +209,29 @@ export function OnboardingFlow() {
   };
 
   const handleFinish = async () => {
+    // Use exactly what the user entered: never fill in made-up figures.
+    if (income.trim() === "" || balance.trim() === "") {
+      setError("Enter your monthly income and current bank balance (0 is fine).");
+      return;
+    }
+    const monthlyIncome = Number(income);
+    const bankBalance = Number(balance);
+    if (!Number.isFinite(monthlyIncome) || monthlyIncome < 0 || !Number.isFinite(bankBalance)) {
+      setError("Enter valid amounts.");
+      return;
+    }
+    setError("");
     setFinishing(true);
     const finalName = name.trim() || "User";
     try {
-      await supabase.auth.updateUser({ data: { full_name: finalName } });
+      if (isSupabaseConfigured) {
+        const { data } = await supabase.auth.getSession();
+        if (data.session) await supabase.auth.updateUser({ data: { full_name: finalName } });
+      }
       setFinished(true);
       setTimeout(() => {
-        setUser({ name: finalName, monthlyIncome: Number(income) || 50000 });
-        setBalance(Number(balance) || 100000);
+        setUser({ name: finalName, monthlyIncome });
+        setBalance(bankBalance);
         completeOnboarding();
       }, 1000);
     } catch (err: unknown) {
@@ -221,9 +250,7 @@ export function OnboardingFlow() {
   };
 
   const handleSkip = () => {
-    setUser({ name: "Demo User", monthlyIncome: 80000 });
-    setBalance(200000);
-    completeOnboarding();
+    dispatch({ type: "LOAD_STATE", payload: buildDemoState() });
   };
 
   // ── UI Content ──
@@ -260,6 +287,20 @@ export function OnboardingFlow() {
   }
 
   const authContent = (
+    !isSupabaseConfigured ? (
+      <div className="space-y-4 text-center">
+        <p className="text-sm text-muted-foreground">
+          Accounts are not configured on this deployment. You can still use the app: your data stays in this browser.
+        </p>
+        <button onClick={() => setStep(1)}
+          className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium flex items-center justify-center gap-2">
+          Continue without an account <ArrowRight className="w-4 h-4" />
+        </button>
+        <button onClick={handleSkip} className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2">
+          Explore with sample data
+        </button>
+      </div>
+    ) :
     <div className="space-y-4">
       <div className="flex rounded-xl bg-muted/50 p-1 mb-2">
         {(["signup", "login"] as const).map(m => (
@@ -317,11 +358,10 @@ export function OnboardingFlow() {
         {googleLoading ? "Redirecting..." : "Continue with Google"}
       </button>
       <div className="pt-3 flex flex-col items-center gap-1.5">
-        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Lock className="w-3 h-3 text-success" /> Bank-grade security</p>
-        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Shield className="w-3 h-3 text-success" /> Your data is encrypted & never shared</p>
+        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Lock className="w-3 h-3 text-success" /> Signed-in data is visible only to your account (row-level security)</p>
       </div>
       <div className="flex flex-col items-center gap-2 pt-2">
-        <button onClick={handleSkip} className="text-[11px] text-muted-foreground/60 hover:text-primary transition-colors underline underline-offset-2">Skip & explore demo</button>
+        <button onClick={handleSkip} className="text-[11px] text-muted-foreground/60 hover:text-primary transition-colors underline underline-offset-2">Explore with sample data</button>
       </div>
     </div>
   );
