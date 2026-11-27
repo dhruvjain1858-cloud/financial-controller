@@ -13,7 +13,9 @@ psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 -f supabase/tests/legacy_fixture.sql
 psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 -f supabase/migrations/0001_finance_schema.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/tests/rls_test.sql
 
-# A second run must refuse (the tables exist) and roll back without changing anything.
+# Snapshot the fc_* tables, then a second run must refuse (the tables exist) and
+# roll back without changing anything.
+psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 -f supabase/tests/fc_snapshot.sql
 if out=$(psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 -f supabase/migrations/0001_finance_schema.sql 2>&1); then
   echo "FAIL: re-running the migration succeeded; it must fail closed" >&2
   exit 1

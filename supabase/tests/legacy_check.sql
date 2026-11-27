@@ -1,47 +1,81 @@
--- Runs AFTER the migration (and after a deliberate second run that must fail):
--- the legacy tables' rows and columns must be exactly as they were.
+-- Runs AFTER the migration and after a deliberate second run that must fail.
+-- Compares the database with the snapshots from legacy_fixture.sql and fc_snapshot.sql.
 \set ON_ERROR_STOP 1
 \set QUIET 1
 \pset tuples_only on
 set client_min_messages = notice;
 reset role;
 
+-- 1-5. Every legacy table: rows, columns, RLS, FORCE RLS, policies (and grants) unchanged.
 do $$
-declare rows_now text; cols_now text;
+declare diff text;
 begin
-  select md5(string_agg(t, '|' order by t)) into rows_now from (
-    select 'users:'        || row_to_json(u)::text as t from public.users u
-    union all select 'income:'       || row_to_json(i)::text from public.income i
-    union all select 'transactions:' || row_to_json(x)::text from public.transactions x
-    union all select 'cards:'        || row_to_json(c)::text from public.cards c
-    union all select 'budgets:'      || row_to_json(b)::text from public.budgets b
-    union all select 'goals:'        || row_to_json(g)::text from public.goals g
-  ) s;
-  select md5(string_agg(table_name || '.' || column_name || ':' || data_type, '|' order by table_name, ordinal_position))
-    into cols_now
-  from information_schema.columns
-  where table_schema = 'public' and table_name in ('users','income','transactions','cards','budgets','goals');
-
-  if rows_now is distinct from (select digest from public._legacy_snapshot where kind = 'rows') then
-    raise exception 'FAIL: legacy table rows changed';
-  end if;
-  if cols_now is distinct from (select digest from public._legacy_snapshot where kind = 'columns') then
-    raise exception 'FAIL: legacy table columns changed';
-  end if;
-  if exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
-             where n.nspname = 'public' and c.relname in ('users','transactions','cards','budgets','goals')
-               and c.relrowsecurity) then
-    raise exception 'FAIL: migration changed RLS settings on a legacy table';
-  end if;
-  raise notice 'PASS legacy tables, rows and columns untouched';
+  select string_agg(format('%s.%s: before [%s] now [%s]', coalesce(b.table_name, n.table_name), coalesce(b.aspect, n.aspect),
+                           coalesce(b.detail, 'missing'), coalesce(n.detail, 'missing')), E'\n'
+                    order by coalesce(b.table_name, n.table_name), coalesce(b.aspect, n.aspect))
+    into diff
+  from public._legacy_snapshot b
+  full join public._describe_tables(array['budgets','cards','goals','income','transactions','users']) n
+    using (table_name, aspect)
+  where b.detail is distinct from n.detail;
+  if diff is not null then raise exception E'FAIL: legacy tables changed:\n%', diff; end if;
+  raise notice 'PASS legacy rows, columns, policies and grants unchanged (budgets, cards, goals, income, transactions, users)';
 end $$;
 
--- The deliberate second run must have left exactly one set of fc_* tables.
-do $$ begin
-  if (select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = 'public' and c.relkind = 'r' and c.relname like 'fc\_%') <> 6 then
-    raise exception 'FAIL: unexpected fc_* tables after the rerun attempt';
+-- Explicit state checks (also implied by the snapshot comparison above).
+do $$
+declare bad text;
+begin
+  select string_agg(c.relname, ', ' order by c.relname) into bad
+  from pg_class c join pg_namespace s on s.oid = c.relnamespace
+  where s.nspname = 'public' and c.relname in ('users','income','transactions','cards','budgets','goals')
+    and not c.relrowsecurity;
+  if bad is not null then raise exception 'FAIL: RLS disabled on legacy table(s): %', bad; end if;
+
+  select string_agg(c.relname, ', ' order by c.relname) into bad
+  from pg_class c join pg_namespace s on s.oid = c.relnamespace
+  where s.nspname = 'public' and c.relname in ('users','income','transactions','cards','budgets','goals')
+    and c.relforcerowsecurity;
+  if bad is not null then raise exception 'FAIL: FORCE RLS enabled on legacy table(s): %', bad; end if;
+
+  if (select count(*) from pg_class c join pg_namespace s on s.oid = c.relnamespace
+      where s.nspname = 'public' and c.relname in ('users','income','transactions','cards','budgets','goals')) <> 6 then
+    raise exception 'FAIL: a legacy table is missing';
   end if;
-  raise notice 'PASS rerunning the migration fails closed and changes nothing';
+
+  select string_agg(tablename || '.' || policyname, ', ' order by tablename, policyname) into bad
+  from pg_policies where schemaname = 'public' and tablename in ('users','income','transactions','cards','budgets','goals');
+  if bad is not null then raise exception 'FAIL: policies exist on legacy tables: %', bad; end if;
+
+  raise notice 'PASS all 6 legacy tables still have RLS enabled, FORCE RLS disabled and zero policies';
+end $$;
+
+-- 6. Exactly one set of the six fc_* tables after the second migration attempt.
+do $$
+declare names text;
+begin
+  select string_agg(c.relname, ',' order by c.relname) into names
+  from pg_class c join pg_namespace s on s.oid = c.relnamespace
+  where s.nspname = 'public' and c.relkind in ('r', 'p') and c.relname like 'fc\_%';
+  if names is distinct from 'fc_budgets,fc_cards,fc_goals,fc_loans,fc_profiles,fc_transactions' then
+    raise exception 'FAIL: expected exactly the six fc_* tables, found: %', coalesce(names, 'none');
+  end if;
+  raise notice 'PASS exactly the six fc_* tables exist after the second migration attempt';
+end $$;
+
+-- 7. The failed second run did not alter the fc_* tables either.
+do $$
+declare diff text;
+begin
+  select string_agg(format('%s.%s: before [%s] now [%s]', coalesce(b.table_name, n.table_name), coalesce(b.aspect, n.aspect),
+                           coalesce(b.detail, 'missing'), coalesce(n.detail, 'missing')), E'\n'
+                    order by coalesce(b.table_name, n.table_name), coalesce(b.aspect, n.aspect))
+    into diff
+  from public._fc_snapshot b
+  full join public._describe_tables(array['fc_budgets','fc_cards','fc_goals','fc_loans','fc_profiles','fc_transactions']) n
+    using (table_name, aspect)
+  where b.detail is distinct from n.detail;
+  if diff is not null then raise exception E'FAIL: second migration attempt changed fc_* tables:\n%', diff; end if;
+  raise notice 'PASS the failed second migration attempt left the fc_* tables unchanged';
 end $$;
 \echo 'ALL LEGACY-SAFETY TESTS PASSED'
