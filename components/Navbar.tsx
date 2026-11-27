@@ -52,36 +52,38 @@ export const Navbar = () => {
 
         <div className="flex items-center gap-2 md:gap-3">
           <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowImport(true)}
-            className="hidden sm:flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 text-primary px-3 py-1.5 rounded-full text-xs font-medium transition-all">
-            <UploadCloud className="w-3 h-3" /> <span>Import</span>
+            aria-label="Import CSV"
+            className="flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 text-primary px-3 py-1.5 rounded-full text-xs font-medium transition-all">
+            <UploadCloud className="w-3 h-3" /> <span className="hidden sm:inline">Import</span>
           </motion.button>
 
-          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowExpense(true)}
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowExpense(true)} aria-label="Add expense"
             className="flex items-center gap-1.5 bg-danger/10 hover:bg-danger/20 text-danger px-3 py-1.5 rounded-full text-xs font-medium transition-all">
             <Minus className="w-3 h-3" /> <span className="hidden sm:inline">Expense</span>
           </motion.button>
 
-          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowIncome(true)}
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowIncome(true)} aria-label="Add income"
             className="flex items-center gap-1.5 bg-success/10 hover:bg-success/20 text-success px-3 py-1.5 rounded-full text-xs font-medium transition-all">
             <Plus className="w-3 h-3" /> <span className="hidden sm:inline">Income</span>
           </motion.button>
 
           <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setAffordOpen(true)}
-            className="hidden md:flex items-center gap-1.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white px-3 py-1.5 rounded-full text-xs font-medium shadow-lg shadow-blue-500/20 transition-all">
-            <Zap className="w-3 h-3" /> Affordability
+            aria-label="Affordability"
+            className="flex items-center gap-1.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white px-3 py-1.5 rounded-full text-xs font-medium shadow-lg shadow-blue-500/20 transition-all">
+            <Zap className="w-3 h-3" /> <span className="hidden md:inline">Affordability</span>
           </motion.button>
 
-          <button onClick={toggleTheme} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-white/5">
+          <button onClick={toggleTheme} aria-label={state.theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-white/5">
             {state.theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
-          <Link href="/alerts" className="relative p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-white/5">
+          <Link href="/alerts" aria-label="Alerts" className="relative p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-white/5">
             <Bell className="w-4 h-4" />
             {dangerCount > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-danger rounded-full animate-pulse-slow" />}
           </Link>
 
           <div className="relative" ref={profileRef}>
-            <button onClick={() => setShowProfile(!showProfile)}
+            <button onClick={() => setShowProfile(!showProfile)} aria-label="Account menu" aria-expanded={showProfile}
               className="w-7 h-7 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 p-[1.5px] transition-transform hover:scale-105">
               <div className="w-full h-full rounded-full bg-card flex items-center justify-center">
                 <span className="text-[10px] font-bold text-muted-foreground">

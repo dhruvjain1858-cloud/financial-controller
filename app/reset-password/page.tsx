@@ -2,14 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
+import { AuthNotConfigured } from "@/components/AuthNotConfigured";
 import { errorMessage } from "@/utils/errors";
 import { Card } from "@/components/Card";
 import { AlertBanner } from "@/components/AlertBanner";
 
 import { Lock, Loader2, Eye, EyeOff, CheckCircle2 } from "lucide-react";
 
-export default function ResetPassword() {
+function ResetPasswordInner() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -147,7 +148,7 @@ export default function ResetPassword() {
               </label>
               <button
                 type="button"
-                onClick={() => setShowPassword(!showPassword)}
+                onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"}
                 className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground z-20"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -194,4 +195,8 @@ export default function ResetPassword() {
       </div>
     </div>
   );
+}
+
+export default function ResetPassword() {
+  return isSupabaseConfigured ? <ResetPasswordInner /> : <AuthNotConfigured />;
 }

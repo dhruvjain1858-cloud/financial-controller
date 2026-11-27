@@ -93,7 +93,7 @@ export default function TransactionsPage() {
                   </p>
                   <p className="text-[10px] text-muted-foreground">{formatDate(tx.date)}</p>
                 </div>
-                <button onClick={() => deleteTransaction(tx.id)}
+                <button onClick={() => deleteTransaction(tx.id)} aria-label={`Delete ${tx.description || tx.category} transaction`}
                   className="p-1.5 opacity-0 group-hover:opacity-100 hover:bg-danger/10 rounded-lg transition-all text-muted-foreground hover:text-danger">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
