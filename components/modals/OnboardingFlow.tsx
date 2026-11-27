@@ -45,29 +45,6 @@ function maskIdentifier(id: string, isEmail: boolean) {
   return `+91 ******${digits.slice(-4)}`;
 }
 
-// ── Upsert user into Supabase "users" table ──
-async function upsertUserRecord(userId: string, email: string) {
-  try {
-    const { data: existingUser } = await supabase
-      .from("users")
-      .select("*")
-      .eq("auth_id", userId)
-      .single();
-
-    if (!existingUser) {
-      await supabase.from("users").insert([
-        {
-          auth_id: userId,
-          email: email,
-          name: email.split("@")[0],
-        },
-      ]);
-    }
-  } catch (err) {
-    console.warn("Could not upsert user record:", err);
-  }
-}
-
 // ── Component ──
 export function OnboardingFlow() {
   const { state, dispatch, setUser, setBalance, completeOnboarding } = useFinancial();
@@ -179,7 +156,8 @@ export function OnboardingFlow() {
       if (error) throw error;
 
       if (data.user) {
-        await upsertUserRecord(data.user.id, data.user.email || identifier);
+        // The fc_profiles row is created by the sync layer (FinancialContext) on sign-in;
+        // the legacy public.users table is deliberately never written.
         const userName = data.user.user_metadata?.full_name || data.user.email?.split("@")[0] || "User";
         setName(userName);
       }
