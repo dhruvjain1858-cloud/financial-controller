@@ -54,7 +54,7 @@ test("quick add categorises, updates totals and triggers the budget alert", asyn
   await page.keyboard.press("Enter");
   await page.goto("/alerts");
   await expect(page.locator("main")).toContainText("Food Budget: 84% Used");
-  await expect(page.locator("main")).toContainText("Total EMI of ₹6,500");
+  await expect(page.locator("main")).toContainText("EMIs of ₹6,500 are still due");
   // persisted to the browser cache (reload keeps it)
   await page.reload();
   await expect(page.locator("main")).toContainText("Food Budget: 84% Used");
@@ -82,4 +82,55 @@ test("CSV import books credits as income and debits as expenses", async ({ page 
   const byDesc = Object.fromEntries(saved.transactions.map((t: { description: string; type: string }) => [t.description, t.type]));
   expect(byDesc["REFUND AMAZON"]).toBe("income");
   expect(byDesc["UBER TRIP"]).toBe("expense");
+});
+
+test("paying an EMI books the expense and removes it from what is still due", async ({ page }) => {
+  await open(page, "/loans");
+  await page.getByRole("button", { name: "Pay EMI" }).first().click();
+  await expect(page.getByText("Paid this month")).toBeVisible();
+  await expect(page.getByText("₹36,317")).toBeVisible(); // 40,000 - (4,000 - 316.67 interest at 9.5%)
+  await page.goto("/");
+  await expect(page.locator("main")).toContainText("-₹2,500"); // only the Phone EMI is still due
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("financial-controller-state")!));
+  expect(saved.balance).toBe(36000);
+  expect(saved.transactions[0]).toMatchObject({ category: "Loans", amount: 4000, description: "EMI: Bike" });
+});
+
+test.describe("first visit (no saved data)", () => {
+  test("onboarding without an account asks for real figures instead of inventing them", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Continue without an account" }).click();
+    await expect(page.getByRole("heading", { name: "What should we call you?" })).toBeVisible();
+    await page.getByRole("textbox").first().fill("Dhruv"); // the onboarding overlay's name field
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Set your baselines" })).toBeVisible();
+    await page.getByRole("button", { name: /Get Started/ }).click();
+    await expect(page.getByText(/Enter your monthly income and current bank balance/)).toBeVisible();
+    await page.getByPlaceholder("50,000").fill("42000");
+    await page.getByPlaceholder("1,00,000").fill("15000");
+    await page.getByRole("button", { name: /Get Started/ }).click();
+    await expect(page.getByText("Welcome back, Dhruv")).toBeVisible({ timeout: 5000 });
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("financial-controller-state")!));
+    expect(saved.user.monthlyIncome).toBe(42000);
+    expect(saved.balance).toBe(15000);
+  });
+
+  test("sample data fills the dashboard, is labelled, and can be cleared", async ({ page }) => {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Explore with sample data" }).click();
+    await expect(page.getByTestId("demo-banner")).toBeVisible();
+    await expect(page.locator("main")).toContainText("₹16,500"); // 38,000 bank - 21,500 card due
+    await page.getByRole("button", { name: "Start with my own data" }).click();
+    await expect(page.getByRole("button", { name: "Continue without an account" })).toBeVisible();
+  });
+});
+
+test("affordability check accounts for EMIs still due", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: "Affordability" }).click();
+  // real balance 10,000 covers 5,000, but not with 6,500 of EMIs still due this month
+  await page.getByLabel("Purchase amount").fill("5000");
+  await expect(page.getByText("Not Recommended", { exact: true })).toBeVisible();
+  await page.getByLabel("Purchase amount").fill("1000");
+  await expect(page.getByText("Safe Spend", { exact: true })).toBeVisible();
 });
