@@ -12,8 +12,10 @@ import {
   Cell,
 } from "recharts";
 
+type ChartDatum = Record<string, string | number>;
+
 interface AreaChartProps {
-  data: any[];
+  data: ChartDatum[];
   dataKey: string;
   categories: string[];
   colors: string[];
@@ -68,7 +70,7 @@ export const GradientAreaChart = ({ data, dataKey, categories, colors, height = 
   );
 };
 
-export const DonutChart = ({ data, height = 300 }: { data: any[]; height?: number }) => {
+export const DonutChart = ({ data, height = 300 }: { data: { name: string; value: number; color: string }[]; height?: number }) => {
   return (
     <div style={{ width: "100%", height }}>
       <ResponsiveContainer>

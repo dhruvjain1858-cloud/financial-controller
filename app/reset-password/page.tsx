@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { errorMessage } from "@/utils/errors";
 import { Card } from "@/components/Card";
 import { AlertBanner } from "@/components/AlertBanner";
-import { motion } from "framer-motion";
+
 import { Lock, Loader2, Eye, EyeOff, CheckCircle2 } from "lucide-react";
 
 export default function ResetPassword() {
@@ -51,7 +52,7 @@ export default function ResetPassword() {
         setAlert({
           type: "danger",
           title: "Update Failed",
-          message: error.message || "Failed to update password. Please try again.",
+          message: errorMessage(error, "Failed to update password. Please try again."),
         });
       } else {
         setSuccess(true);
@@ -64,7 +65,7 @@ export default function ResetPassword() {
           router.push("/auth");
         }, 2000);
       }
-    } catch (err: any) {
+    } catch {
       setAlert({
         type: "danger",
         title: "Error",

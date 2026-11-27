@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { errorMessage } from "@/utils/errors";
 import { Card } from "@/components/Card";
 import { AlertBanner } from "@/components/AlertBanner";
-import { motion } from "framer-motion";
+
 import { Mail, ArrowLeft, Loader2 } from "lucide-react";
 import Link from "next/link";
 
@@ -34,7 +35,7 @@ export default function ForgotPassword() {
         setAlert({
           type: "danger",
           title: "Error",
-          message: error.message || "Failed to send OTP",
+          message: errorMessage(error, "Failed to send OTP"),
         });
       } else {
         setAlert({
@@ -46,7 +47,7 @@ export default function ForgotPassword() {
           router.push(`/verify-otp?email=${encodeURIComponent(email)}`);
         }, 1500);
       }
-    } catch (err: any) {
+    } catch {
       setAlert({
         type: "danger",
         title: "Error",
@@ -76,7 +77,7 @@ export default function ForgotPassword() {
           <div className="space-y-2 relative z-10">
             <h1 className="text-3xl font-bold tracking-tight">Forgot Password</h1>
             <p className="text-muted-foreground">
-              Enter your email address and we'll send you a 6-digit code to reset your password.
+              Enter your email address and we&apos;ll send you a 6-digit code to reset your password.
             </p>
           </div>
 

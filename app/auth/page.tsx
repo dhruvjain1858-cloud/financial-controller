@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { errorMessage } from "@/utils/errors";
 import { Card } from "@/components/Card";
 import { AlertBanner } from "@/components/AlertBanner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -50,11 +51,11 @@ export default function AuthPage() {
           message: "We've sent you a confirmation link to complete your signup.",
         });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setAlert({
         type: "danger",
         title: isLogin ? "Login Failed" : "Signup Failed",
-        message: error.message || "Something went wrong. Please try again.",
+        message: errorMessage(error, "Something went wrong. Please try again."),
       });
     } finally {
       setLoading(false);
@@ -64,12 +65,12 @@ export default function AuthPage() {
   const handleGoogleLogin = async () => {
     try {
       await signInWithGoogle();
-    } catch (error: any) {
-      console.error("Google login error:", error.message);
+    } catch (error: unknown) {
+      console.error("Google login error:", errorMessage(error));
       setAlert({
         type: "danger",
         title: "OAuth Error",
-        message: error.message || "Failed to sign in with Google.",
+        message: errorMessage(error, "Failed to sign in with Google."),
       });
     }
   };
@@ -80,11 +81,11 @@ export default function AuthPage() {
         provider,
       });
       if (error) throw error;
-    } catch (error: any) {
+    } catch (error: unknown) {
       setAlert({
         type: "danger",
         title: "OAuth Error",
-        message: error.message || `Failed to sign in with ${provider}.`,
+        message: errorMessage(error, `Failed to sign in with ${provider}.`),
       });
     }
   };
@@ -109,14 +110,14 @@ export default function AuthPage() {
               Control Your <span className="text-primary">Financial</span> Destiny.
             </h1>
             <p className="text-xl text-muted-foreground leading-relaxed">
-              Experience the next generation of financial behavior control. Predict risks, prevent overspending, and grow your wealth with AI.
+              Experience the next generation of financial behavior control. See what you can really spend after card dues and EMIs, and get warned before you overspend.
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             {[
               { label: "Anti-Gravity UI", desc: "Fluid animations" },
-              { label: "AI Insights", desc: "Predictive power" },
+              { label: "Smart Insights", desc: "Rule-based alerts" },
               { label: "Smart Controls", desc: "Prevent mistakes" },
               { label: "Bank Level", desc: "Secure & private" },
             ].map((feature, i) => (

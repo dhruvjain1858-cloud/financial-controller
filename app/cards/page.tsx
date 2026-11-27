@@ -102,7 +102,7 @@ export default function CardsPage() {
         </div>
       )}
 
-      <AddCardModal isOpen={showAdd || !!editCard} onClose={() => { setShowAdd(false); setEditCard(null); }} editCard={editCard} />
+      <AddCardModal key={editCard?.id ?? (showAdd ? "new" : "closed")} isOpen={showAdd || !!editCard} onClose={() => { setShowAdd(false); setEditCard(null); }} editCard={editCard} />
     </div>
   );
 }

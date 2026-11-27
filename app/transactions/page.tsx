@@ -2,7 +2,7 @@
 
 import { Card } from "@/components/Card";
 import { formatCurrency, formatDate, cn } from "@/utils/helpers";
-import { Receipt, Trash2, ArrowUpRight, ArrowDownRight, Download, Search, Filter } from "lucide-react";
+import { Receipt, Trash2, ArrowUpRight, ArrowDownRight, Download, Search } from "lucide-react";
 import { useFinancial } from "@/context/FinancialContext";
 import { exportToCSV } from "@/utils/calculations";
 import { motion } from "framer-motion";

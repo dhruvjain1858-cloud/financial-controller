@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useEffect, useState } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import { cn } from "@/utils/helpers";
 import { Plus, Minus } from "lucide-react";
 
@@ -84,13 +84,13 @@ export function CurrencyInput({
     [onChange, allowDecimal]
   );
 
-  const getStep = (current: number) => {
+  const getStep = useCallback((current: number) => {
     if (allowDecimal) return 0.5;
     if (noPrefix) return 1;
     if (current < 50000) return 5000;
     if (current < 500000) return 10000;
     return 50000;
-  };
+  }, [allowDecimal, noPrefix]);
 
   const valRef = useRef(value);
   useEffect(() => { valRef.current = value; }, [value]);
@@ -112,7 +112,7 @@ export function CurrencyInput({
       valRef.current = nextNum.toString();
     }
     onChange(valRef.current);
-  }, [allowDecimal, onChange]);
+  }, [allowDecimal, onChange, getStep]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {

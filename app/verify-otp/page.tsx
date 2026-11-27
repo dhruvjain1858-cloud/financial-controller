@@ -3,29 +3,26 @@
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { errorMessage } from "@/utils/errors";
 import { Card } from "@/components/Card";
 import { AlertBanner } from "@/components/AlertBanner";
-import { motion } from "framer-motion";
+
 import { ShieldCheck, ArrowLeft, Loader2, Key } from "lucide-react";
 import Link from "next/link";
 
 function VerifyOTPContent() {
   const [otp, setOtp] = useState("");
-  const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState<{ type: "safe" | "danger"; title: string; message: string } | null>(null);
   
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const email = searchParams.get("email") ?? "";
+
   useEffect(() => {
-    const emailParam = searchParams.get("email");
-    if (emailParam) {
-      setEmail(emailParam);
-    } else {
-      router.push("/forgot-password");
-    }
-  }, [searchParams, router]);
+    if (!email) router.push("/forgot-password");
+  }, [email, router]);
 
   const handleVerifyOTP = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,7 +49,7 @@ function VerifyOTPContent() {
         setAlert({
           type: "danger",
           title: "Verification Failed",
-          message: error.message || "Invalid or expired code. Please try again.",
+          message: errorMessage(error, "Invalid or expired code. Please try again."),
         });
       } else {
         setAlert({
@@ -64,7 +61,7 @@ function VerifyOTPContent() {
           router.push("/reset-password");
         }, 1500);
       }
-    } catch (err: any) {
+    } catch {
       setAlert({
         type: "danger",
         title: "Error",
@@ -94,7 +91,7 @@ function VerifyOTPContent() {
           <div className="space-y-2 relative z-10">
             <h1 className="text-3xl font-bold tracking-tight">Verify Code</h1>
             <p className="text-muted-foreground">
-              We've sent a 6-digit verification code to <span className="text-foreground font-medium">{email}</span>.
+              We&apos;ve sent a 6-digit verification code to <span className="text-foreground font-medium">{email}</span>.
             </p>
           </div>
 
@@ -145,8 +142,8 @@ function VerifyOTPContent() {
             </button>
             
             <p className="text-center text-sm text-muted-foreground">
-              Didn't receive the code? {" "}
-              <Link href="/forgot-password" size="sm" className="text-primary hover:underline font-medium">
+              Didn&apos;t receive the code? {" "}
+              <Link href="/forgot-password" className="text-primary hover:underline font-medium">
                 Resend Code
               </Link>
             </p>

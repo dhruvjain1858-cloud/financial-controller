@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, CreditCard, PieChart, Landmark, ShieldAlert, Sparkles, Target, Wallet, Receipt, BarChart3 } from "lucide-react";
+import { LayoutDashboard, CreditCard, PieChart, Landmark, ShieldAlert, Sparkles, Target, Receipt, BarChart3 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/utils/helpers";
@@ -23,7 +23,7 @@ export const Sidebar = () => {
   const pathname = usePathname();
   const { state } = useFinancial();
   const insights = generateInsights(state);
-  const topInsight = insights[0] || "Add transactions to get AI-powered insights.";
+  const topInsight = insights[0] || "Add transactions to see insights.";
 
   return (
     <>
@@ -64,7 +64,7 @@ export const Sidebar = () => {
           <div className="p-3 rounded-xl glass-card flex flex-col gap-1.5">
             <div className="flex items-center gap-1.5 text-warning">
               <Sparkles className="w-3.5 h-3.5" />
-              <span className="text-[10px] font-semibold uppercase tracking-wider">AI Insight</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider">Insight</span>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">{topInsight}</p>
           </div>

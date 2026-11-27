@@ -10,7 +10,7 @@ import { CurrencyInput } from "@/components/CurrencyInput";
 import { motion } from "framer-motion";
 import { useState } from "react";
 import { getSpendingByCategory } from "@/utils/calculations";
-import { AlertCircle, TrendingUp, CheckCircle, Clock } from "lucide-react";
+import { AlertCircle, TrendingUp, Clock } from "lucide-react";
 
 export default function GoalsPage() {
   const { state, deleteGoal, updateGoal } = useFinancial();
