@@ -25,8 +25,22 @@ export function formatDate(dateString: string): string {
   });
 }
 
+/** YYYY-MM-DD in the user's LOCAL timezone (toISOString() is UTC, which is
+ *  the previous day in India before 05:30). */
+export function localISODate(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** YYYY-MM for the local month. */
+export function localMonthKey(d: Date = new Date()): string {
+  return localISODate(d).slice(0, 7);
+}
+
 export function todayISO(): string {
-  return new Date().toISOString().split("T")[0];
+  return localISODate();
 }
 
 export function daysUntil(dateString: string): number {

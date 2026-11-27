@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Modal } from "@/components/Modal";
 import { useFinancial } from "@/context/FinancialContext";
 import { CurrencyInput } from "@/components/CurrencyInput";
@@ -10,18 +10,18 @@ interface Props {
 
 export function PayCardBillModal({ isOpen, onClose }: Props) {
   const { state, payCardBill } = useFinancial();
-  const [selectedCardId, setSelectedCardId] = useState("");
-  const [amount, setAmount] = useState("");
+  const [pickedCardId, setPickedCardId] = useState("");
+  const [typedAmount, setTypedAmount] = useState<string | null>(null);
   const [error, setError] = useState("");
 
-  // Auto-select first card and fill amount
-  useEffect(() => {
-    if (isOpen && state.cards.length > 0 && !selectedCardId) {
-      const firstCardWithDue = state.cards.find(c => c.used > 0) || state.cards[0];
-      setSelectedCardId(firstCardWithDue.id);
-      setAmount(firstCardWithDue.used > 0 ? firstCardWithDue.used.toString() : "");
-    }
-  }, [isOpen, state.cards, selectedCardId]);
+  // Default to the first card with dues, prefilled with its outstanding amount,
+  // until the user picks a card or types an amount (derived, not copied into state).
+  const defaultCard = state.cards.find(c => c.used > 0) || state.cards[0];
+  const selectedCardId = state.cards.some(c => c.id === pickedCardId) ? pickedCardId : defaultCard?.id ?? "";
+  const selectedCard = state.cards.find(c => c.id === selectedCardId);
+  const amount = typedAmount ?? (selectedCard && selectedCard.used > 0 ? selectedCard.used.toString() : "");
+  const setSelectedCardId = setPickedCardId;
+  const setAmount = (v: string) => setTypedAmount(v);
 
   // Update amount when card changes
   const handleCardChange = (e: React.ChangeEvent<HTMLSelectElement>) => {

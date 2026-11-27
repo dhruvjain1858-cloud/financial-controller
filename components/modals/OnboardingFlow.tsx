@@ -3,8 +3,9 @@
 import { useState, useRef, useEffect } from "react";
 import { useFinancial } from "@/context/FinancialContext";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mail, Phone, Lock, ArrowRight, CheckCircle2, Shield, User, Loader2, Eye, EyeOff, KeyRound } from "lucide-react";
+import { Mail, Phone, Lock, ArrowRight, CheckCircle2, Shield, User, Loader2, KeyRound } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
+import { errorMessage, errorName } from "@/utils/errors";
 import { CurrencyInput } from "@/components/CurrencyInput";
 
 const GOOGLE_SVG = (
@@ -60,7 +61,6 @@ async function upsertUserRecord(userId: string, email: string) {
           name: email.split("@")[0],
         },
       ]);
-      console.log("New user record created in DB");
     }
   } catch (err) {
     console.warn("Could not upsert user record:", err);
@@ -69,7 +69,7 @@ async function upsertUserRecord(userId: string, email: string) {
 
 // ── Component ──
 export function OnboardingFlow() {
-  const { state, setUser, setBalance, completeOnboarding, dispatch } = useFinancial();
+  const { state, setUser, setBalance, completeOnboarding } = useFinancial();
 
   // Flow state
   const [step, setStep] = useState(0); // 0=auth, 1=profile, 2=financial
@@ -115,7 +115,6 @@ export function OnboardingFlow() {
     setLoading(true);
     try {
       const formattedId = loginType === "email" ? val : formatPhone(val);
-      console.log(`Attempting to send OTP to ${loginType}:`, formattedId, "Mode:", authMode);
 
       // We use shouldCreateUser: true for both to avoid "User not found" errors.
       const { error } = await supabase.auth.signInWithOtp(
@@ -129,15 +128,14 @@ export function OnboardingFlow() {
         throw error;
       }
 
-      console.log("OTP sent successfully!");
       setOtpSent(true);
       setResendCooldown(30);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Catch Error during OTP Send:", err);
-      if (err.name === 'AuthRetryableFetchError') {
+      if (errorName(err) === 'AuthRetryableFetchError') {
         setError("Network error: Could not reach Supabase. Please check your internet connection or disable any ad-blockers.");
       } else {
-        setError(err.message || "Failed to send OTP");
+        setError(errorMessage(err, "Failed to send OTP"));
       }
     } finally {
       setLoading(false);
@@ -160,7 +158,7 @@ export function OnboardingFlow() {
 
       const { data, error } = await supabase.auth.verifyOtp(
         loginType === "email"
-          ? { email: formattedId, token: code, type: verifyType as any }
+          ? { email: formattedId, token: code, type: verifyType as "signup" | "email" }
           : { phone: formattedId, token: code, type: "sms" }
       );
 
@@ -174,8 +172,8 @@ export function OnboardingFlow() {
 
       setOtpSent(false);
       setStep(1);
-    } catch (err: any) {
-      setError(err.message || "Invalid or expired OTP");
+    } catch (err: unknown) {
+      setError(errorMessage(err, "Invalid or expired OTP"));
     } finally {
       setLoading(false);
     }
@@ -190,9 +188,9 @@ export function OnboardingFlow() {
         options: { redirectTo: window.location.origin },
       });
       if (error) throw error;
-    } catch (err: any) {
+    } catch (err: unknown) {
       setGoogleLoading(false);
-      setError(err.message || "Failed to connect with Google.");
+      setError(errorMessage(err, "Failed to connect with Google."));
     }
   };
 
@@ -207,8 +205,8 @@ export function OnboardingFlow() {
         setBalance(Number(balance) || 100000);
         completeOnboarding();
       }, 1000);
-    } catch (err: any) {
-      setError(err.message || "Failed to save profile");
+    } catch (err: unknown) {
+      setError(errorMessage(err, "Failed to save profile"));
       setFinishing(false);
     }
   };

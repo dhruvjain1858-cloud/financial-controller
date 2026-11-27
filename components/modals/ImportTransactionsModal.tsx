@@ -2,9 +2,10 @@ import { useState, useRef } from "react";
 import { Modal } from "@/components/Modal";
 import { useFinancial } from "@/context/FinancialContext";
 import { detectCategory } from "@/utils/smartInput";
-import { UploadCloud, CheckCircle2, AlertCircle, Trash2 } from "lucide-react";
-import { formatCurrency, todayISO } from "@/utils/helpers";
-import { Transaction } from "@/types";
+import { parseCSV, rowsToTransactions } from "@/utils/csv";
+import { UploadCloud, CheckCircle2, AlertCircle } from "lucide-react";
+import { formatCurrency } from "@/utils/helpers";
+
 import { motion } from "framer-motion";
 
 interface Props {
@@ -17,47 +18,11 @@ interface ParsedTx {
   date: string;
   description: string;
   amount: number;
+  type: "income" | "expense";
   category: string;
   confidence: string;
   isDuplicate: boolean;
   exclude: boolean;
-}
-
-function parseCSV(text: string) {
-  const rows: string[][] = [];
-  let currentRow: string[] = [];
-  let currentVal = '';
-  let insideQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    const nextChar = text[i + 1];
-
-    if (char === '"' && insideQuotes && nextChar === '"') {
-      currentVal += '"';
-      i++;
-    } else if (char === '"') {
-      insideQuotes = !insideQuotes;
-    } else if (char === ',' && !insideQuotes) {
-      currentRow.push(currentVal.trim());
-      currentVal = '';
-    } else if ((char === '\n' || char === '\r') && !insideQuotes) {
-      if (char === '\r' && nextChar === '\n') i++;
-      currentRow.push(currentVal.trim());
-      if (currentRow.some(v => v !== '')) {
-        rows.push(currentRow);
-      }
-      currentRow = [];
-      currentVal = '';
-    } else {
-      currentVal += char;
-    }
-  }
-  if (currentVal || currentRow.length > 0) {
-    currentRow.push(currentVal.trim());
-    if (currentRow.some(v => v !== '')) rows.push(currentRow);
-  }
-  return rows;
 }
 
 export function ImportTransactionsModal({ isOpen, onClose }: Props) {
@@ -85,64 +50,38 @@ export function ImportTransactionsModal({ isOpen, onClose }: Props) {
   };
 
   const processCSV = (text: string) => {
-    const rows = parseCSV(text);
-    if (rows.length < 2) {
-      setError("CSV file must contain headers and at least one row.");
+    const result = rowsToTransactions(parseCSV(text));
+    if (result.error) {
+      setError(result.error);
       return;
     }
 
-    const headers = rows[0].map(h => h.toLowerCase().replace(/[^a-z]/g, ''));
-    const dateIdx = headers.findIndex(h => h.includes('date') || h.includes('time'));
-    const descIdx = headers.findIndex(h => h.includes('desc') || h.includes('narration') || h.includes('details') || h.includes('title') || h.includes('payee'));
-    const amountIdx = headers.findIndex(h => h.includes('amount') || h.includes('debit') || h.includes('credit') || h.includes('value'));
-
-    if (descIdx === -1 || amountIdx === -1) {
-      setError("Could not detect standard columns. Ensure your CSV has 'Description' and 'Amount' columns.");
-      return;
-    }
-
-    const txs: ParsedTx[] = [];
-
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      if (row.length < Math.max(descIdx, amountIdx)) continue;
-
-      let dateStr = dateIdx !== -1 ? row[dateIdx] : todayISO();
-      // basic fallback if date is weird
-      if (!dateStr || dateStr.length < 5) dateStr = todayISO();
-
-      let desc = row[descIdx];
-      // Clean description
-      desc = desc.replace(/^[^\w\s]+/, "").trim();
-
-      const amountStr = row[amountIdx].replace(/[^0-9.-]/g, '');
-      const amount = Math.abs(parseFloat(amountStr));
-
-      if (isNaN(amount) || amount <= 0 || !desc) continue;
-
-      const detection = detectCategory(desc, state.customMappings);
-
+    const txs: ParsedTx[] = result.rows.map((r) => {
+      const detection = r.type === "income"
+        ? { category: "Salary", confidence: "LOW" }
+        : detectCategory(r.description, state.customMappings);
       // Duplicate check against existing state
       const isDuplicate = state.transactions.some(
-        t => t.amount === amount && t.description?.toLowerCase() === desc.toLowerCase() && t.date === dateStr
+        (t) => t.amount === r.amount && t.description?.toLowerCase() === r.description.toLowerCase() && t.date === r.date
       );
-
-      txs.push({
+      return {
         id: Math.random().toString(),
-        date: dateStr,
-        description: desc,
-        amount,
+        date: r.date,
+        description: r.description,
+        amount: r.amount,
+        type: r.type,
         category: detection.category,
         confidence: detection.confidence,
         isDuplicate,
         exclude: isDuplicate, // auto-exclude duplicates
-      });
-    }
+      };
+    });
 
     if (txs.length === 0) {
-      setError("No valid transactions found in the CSV.");
+      setError(`No valid transactions found in the CSV${result.skipped ? ` (${result.skipped} rows had a missing date, description or amount)` : ""}.`);
     } else {
       setParsedTxs(txs);
+      if (result.skipped) setSuccessMsg(`${result.skipped} rows were skipped because the date, description or amount could not be read.`);
     }
   };
 
@@ -165,21 +104,22 @@ export function ImportTransactionsModal({ isOpen, onClose }: Props) {
     toImport.forEach(t => {
       // If user changed category from what was strictly detected, store mapping
       const originalDetection = detectCategory(t.description, state.customMappings);
-      if (t.category !== originalDetection.category && originalDetection.category !== "Other") {
+      if (t.type === "expense" && t.category !== originalDetection.category && originalDetection.category !== "Other") {
         addCustomMapping(t.description, t.category);
       }
 
-      addTransaction({
-        type: "expense",
+      const result = addTransaction({
+        type: t.type,
         amount: t.amount,
         category: t.category,
-        description: t.description,
-        date: t.date || todayISO(),
+        description: t.description.slice(0, 200),
+        date: t.date,
       });
-      count++;
+      if (result.ok) count++;
     });
 
-    setSuccessMsg(`${count} transactions imported successfully!`);
+    const failed = toImport.length - count;
+    setSuccessMsg(`${count} transactions imported${failed ? `, ${failed} rejected as invalid` : ""}.`);
     setParsedTxs([]);
     setTimeout(() => {
       setSuccessMsg("");
@@ -204,7 +144,7 @@ export function ImportTransactionsModal({ isOpen, onClose }: Props) {
         ) : parsedTxs.length === 0 ? (
           <>
             <p className="text-sm text-muted-foreground">
-              Upload a bank CSV statement. Our AI will clean the data, remove duplicates, and auto-categorize each row.
+              Upload a bank CSV statement. Rows are cleaned, likely duplicates are flagged, and each row is auto-categorized by keyword.
             </p>
 
             <div

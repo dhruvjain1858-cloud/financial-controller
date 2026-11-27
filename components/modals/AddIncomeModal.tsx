@@ -26,12 +26,13 @@ export function AddIncomeModal({ isOpen, onClose }: Props) {
       setError("Enter a valid amount greater than 0");
       return;
     }
-    addTransaction({
+    const result = addTransaction({
       type: "income",
       amount: num,
       category: source,
       date,
     });
+    if (!result.ok) { setError(result.error); return; }
     setAmount("");
     setError("");
     onClose();

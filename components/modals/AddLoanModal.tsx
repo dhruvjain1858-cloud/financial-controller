@@ -23,7 +23,8 @@ export function AddLoanModal({ isOpen, onClose }: Props) {
     if (!t || t <= 0) { setError("Enter valid total amount"); return; }
     if (r < 0) { setError("Remaining cannot be negative"); return; }
     if (!e || e <= 0) { setError("Enter valid EMI"); return; }
-    addLoan({ name: name.trim(), totalAmount: t, remaining: r || t, emi: e, interest: int_ || 0, monthsRemaining: m || 0 });
+    const result = addLoan({ name: name.trim(), totalAmount: t, remaining: r || t, emi: e, interest: int_ || 0, monthsRemaining: m || 0 });
+    if (!result.ok) { setError(result.error); return; }
     setName(""); setTotal(""); setRemaining(""); setEmi(""); setInterest(""); setMonths(""); setError(""); onClose();
   };
 

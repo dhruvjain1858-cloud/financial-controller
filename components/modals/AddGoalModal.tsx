@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Modal } from "@/components/Modal";
 import { useFinancial } from "@/context/FinancialContext";
-import { todayISO } from "@/utils/helpers";
+
 import { CurrencyInput } from "@/components/CurrencyInput";
 
 interface Props {
@@ -24,12 +24,13 @@ export function AddGoalModal({ isOpen, onClose }: Props) {
     const t = Number(target);
     if (!t || t <= 0) { setError("Enter a valid target amount"); return; }
     if (!deadline) { setError("Set a deadline"); return; }
-    addGoal({
+    const result = addGoal({
       title: title.trim(),
       targetAmount: t,
       savedAmount: Number(saved) || 0,
       deadline,
     });
+    if (!result.ok) { setError(result.error); return; }
     setTitle("");
     setTarget("");
     setSaved("0");
