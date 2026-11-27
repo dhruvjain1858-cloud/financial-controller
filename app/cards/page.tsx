@@ -69,10 +69,10 @@ export default function CardsPage() {
                           {isHigh ? <AlertTriangle className="w-3 h-3" /> : <ShieldCheck className="w-3 h-3" />}
                           {risk.charAt(0).toUpperCase() + risk.slice(1)}
                         </div>
-                        <button onClick={() => setEditCard(card)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-muted-foreground hover:text-foreground">
+                        <button onClick={() => setEditCard(card)} aria-label={`Edit ${card.name}`} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-muted-foreground hover:text-foreground">
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => deleteCard(card.id)} className="p-1.5 hover:bg-danger/10 rounded-lg transition-colors text-muted-foreground hover:text-danger">
+                        <button onClick={() => deleteCard(card.id)} aria-label={`Delete ${card.name}`} className="p-1.5 hover:bg-danger/10 rounded-lg transition-colors text-muted-foreground hover:text-danger">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -102,7 +102,7 @@ export default function CardsPage() {
         </div>
       )}
 
-      <AddCardModal isOpen={showAdd || !!editCard} onClose={() => { setShowAdd(false); setEditCard(null); }} editCard={editCard} />
+      <AddCardModal key={editCard?.id ?? (showAdd ? "new" : "closed")} isOpen={showAdd || !!editCard} onClose={() => { setShowAdd(false); setEditCard(null); }} editCard={editCard} />
     </div>
   );
 }

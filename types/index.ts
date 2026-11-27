@@ -34,6 +34,8 @@ export interface Loan {
   emi: number;
   interest: number;
   monthsRemaining: number;
+  /** YYYY-MM of the last EMI paid; that month's EMI is no longer "due". */
+  lastPaidMonth?: string;
 }
 
 export interface Budget {
@@ -86,6 +88,7 @@ export const DEFAULT_CATEGORIES = [
   "Salary",
   "Freelance",
   "Investment",
+  "Loans",
   "Other",
 ];
 
@@ -102,6 +105,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   Salary: "#10B981",
   Freelance: "#8B5CF6",
   Investment: "#06B6D4",
+  Loans: "#F43F5E",
   Other: "#9CA3AF",
 };
 

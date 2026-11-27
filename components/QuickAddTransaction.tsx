@@ -31,13 +31,14 @@ export function QuickAddTransaction() {
       return;
     }
 
-    addTransaction({
+    const result = addTransaction({
       type: "expense",
       amount: parsed.amount,
       category: parsed.category,
       description: parsed.description,
       date: todayISO(),
     });
+    if (!result.ok) { setError(result.error); return; }
 
     setInput("");
     setError("");

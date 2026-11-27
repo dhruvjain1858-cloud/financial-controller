@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Modal } from "@/components/Modal";
 import { useFinancial } from "@/context/FinancialContext";
 import { todayISO } from "@/utils/helpers";
@@ -21,21 +21,22 @@ export function AddExpenseModal({ isOpen, onClose }: Props) {
   const [creditCardId, setCreditCardId] = useState("");
   const [error, setError] = useState("");
 
-  const [detectedCat, setDetectedCat] = useState<{ category: string; confidence: string } | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState(false);
 
-  // Auto-categorize based on description
-  useEffect(() => {
-    if (description) {
-      const detection = detectCategory(description, state.customMappings);
-      setDetectedCat(detection);
+  // Auto-categorize based on description (derived, not stored)
+  const detectedCat = description ? detectCategory(description, state.customMappings) : null;
+
+  const handleDescriptionChange = (value: string) => {
+    setDescription(value);
+    setDuplicateWarning(false);
+    setError("");
+    if (value) {
+      const detection = detectCategory(value, state.customMappings);
       if (detection.category !== "Other" && state.categories.includes(detection.category)) {
         setCategory(detection.category);
       }
-    } else {
-      setDetectedCat(null);
     }
-  }, [description, state.categories, state.customMappings]);
+  };
 
   const handleSubmit = () => {
     const num = Number(amount);
@@ -69,7 +70,7 @@ export function AddExpenseModal({ isOpen, onClose }: Props) {
       }
     }
 
-    addTransaction({
+    const result = addTransaction({
       type: "expense",
       amount: num,
       category: finalCategory,
@@ -77,6 +78,7 @@ export function AddExpenseModal({ isOpen, onClose }: Props) {
       description: description || undefined,
       creditCardId: creditCardId || undefined,
     });
+    if (!result.ok) { setError(result.error); return; }
     setAmount("");
     setDescription("");
     setCreditCardId("");
@@ -128,7 +130,7 @@ export function AddExpenseModal({ isOpen, onClose }: Props) {
           <input
             type="text"
             value={description}
-            onChange={(e) => { setDescription(e.target.value); setDuplicateWarning(false); setError(""); }}
+            onChange={(e) => handleDescriptionChange(e.target.value)}
             placeholder="e.g., Lunch with team"
             className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary transition-all"
           />

@@ -21,7 +21,8 @@ export function AddBudgetModal({ isOpen, onClose }: Props) {
     const lim = Number(limit);
     if (!lim || lim <= 0) { setError("Enter a valid budget limit"); return; }
     if (state.budgets.some(b => b.category === category)) { setError("Budget already exists for this category"); return; }
-    addBudget({ category, limit: lim });
+    const result = addBudget({ category, limit: lim });
+    if (!result.ok) { setError(result.error); return; }
     setLimit(""); setError(""); onClose();
   };
 

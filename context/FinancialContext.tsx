@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode } from "react";
+import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, useState, ReactNode } from "react";
 import {
   FinancialState,
   Transaction,
@@ -12,10 +12,25 @@ import {
   initialState,
 } from "@/types";
 import { detectCategory } from "@/utils/smartInput";
-import { supabase } from "@/lib/supabaseClient";
+import { isEmiDue, splitEmi } from "@/utils/calculations";
+import { todayISO } from "@/utils/helpers";
+import { useRouter } from "next/navigation";
+import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
+import {
+  sanitizeState,
+  validateBudget,
+  validateCard,
+  validateGoal,
+  validateLoan,
+  validateTransaction,
+  type ValidationResult,
+} from "@/lib/validation";
+import { planSync, isEmptyPlan } from "@/lib/sync/diff";
+import { isRemoteEmpty, stateFromRemote } from "@/lib/sync/mapping";
+import { applyPlan, loadRemote } from "@/lib/sync/supabaseRepo";
 
 // ─── Action types ───────────────────────────────────────────────
-type Action =
+export type Action =
   | { type: "LOAD_STATE"; payload: FinancialState }
   | { type: "SET_USER"; payload: User }
   | { type: "SET_BALANCE"; payload: number }
@@ -34,6 +49,7 @@ type Action =
   | { type: "ADD_LOAN"; payload: Loan }
   | { type: "UPDATE_LOAN"; payload: Loan }
   | { type: "DELETE_LOAN"; payload: string }
+  | { type: "PAY_EMI"; payload: { loanId: string; txId: string; date: string } }
   // budgets
   | { type: "ADD_BUDGET"; payload: Budget }
   | { type: "UPDATE_BUDGET"; payload: Budget }
@@ -49,7 +65,7 @@ type Action =
   | { type: "SIGN_OUT" };
 
 // ─── Reducer ────────────────────────────────────────────────────
-function financialReducer(state: FinancialState, action: Action): FinancialState {
+export function financialReducer(state: FinancialState, action: Action): FinancialState {
   switch (action.type) {
     case "LOAD_STATE":
       return { ...action.payload };
@@ -134,12 +150,15 @@ function financialReducer(state: FinancialState, action: Action): FinancialState
       };
     }
     case "PAY_CARD_BILL": {
+      // Pay at most what is owed, so an overpayment cannot vanish from the books.
+      const card = state.cards.find((c) => c.id === action.payload.cardId);
+      if (!card) return state;
+      const paid = Math.min(action.payload.amount, card.used);
+      if (paid <= 0) return state;
       return {
         ...state,
-        balance: state.balance - action.payload.amount,
-        cards: state.cards.map((c) => 
-          c.id === action.payload.cardId ? { ...c, used: Math.max(0, c.used - action.payload.amount) } : c
-        ),
+        balance: state.balance - paid,
+        cards: state.cards.map((c) => (c.id === card.id ? { ...c, used: c.used - paid } : c)),
       };
     }
 
@@ -149,13 +168,49 @@ function financialReducer(state: FinancialState, action: Action): FinancialState
     case "UPDATE_CARD":
       return { ...state, cards: state.cards.map((c) => (c.id === action.payload.id ? action.payload : c)) };
     case "DELETE_CARD":
-      return { ...state, cards: state.cards.filter((c) => c.id !== action.payload) };
+      // Keep the transactions but detach them from the deleted card
+      // (matches ON DELETE SET NULL in the database).
+      return {
+        ...state,
+        cards: state.cards.filter((c) => c.id !== action.payload),
+        transactions: state.transactions.map((t) => {
+          if (t.creditCardId !== action.payload) return t;
+          const { creditCardId: _removed, ...rest } = t;
+          void _removed;
+          return rest;
+        }),
+      };
 
     // ── Loans ──
     case "ADD_LOAN":
       return { ...state, loans: [...state.loans, action.payload] };
     case "UPDATE_LOAN":
       return { ...state, loans: state.loans.map((l) => (l.id === action.payload.id ? action.payload : l)) };
+    case "PAY_EMI": {
+      // One action so the expense and the loan update can never get out of step.
+      const loan = state.loans.find((l) => l.id === action.payload.loanId);
+      const month = action.payload.date.slice(0, 7);
+      if (!loan || !isEmiDue(loan, month)) return state;
+      const { principal, payment } = splitEmi(loan);
+      if (payment <= 0) return state;
+      const remaining = Math.max(0, Math.round((loan.remaining - principal) * 100) / 100);
+      const paid: Loan = {
+        ...loan,
+        remaining,
+        monthsRemaining: remaining === 0 ? 0 : Math.max(0, loan.monthsRemaining - 1),
+        lastPaidMonth: month,
+      };
+      const tx: Transaction = {
+        id: action.payload.txId, type: "expense", amount: payment, category: "Loans",
+        date: action.payload.date, description: `EMI: ${loan.name}`,
+      };
+      return {
+        ...state,
+        balance: state.balance - payment,
+        loans: state.loans.map((l) => (l.id === loan.id ? paid : l)),
+        transactions: [tx, ...state.transactions],
+      };
+    }
     case "DELETE_LOAN":
       return { ...state, loans: state.loans.filter((l) => l.id !== action.payload) };
 
@@ -197,25 +252,36 @@ function financialReducer(state: FinancialState, action: Action): FinancialState
 }
 
 // ─── Context shape ──────────────────────────────────────────────
+export type SyncStatus = "local" | "loading" | "syncing" | "synced" | "error";
+
 interface FinancialContextType {
   state: FinancialState;
   dispatch: React.Dispatch<Action>;
-  // helpers
-  addTransaction: (tx: Omit<Transaction, "id">) => void;
-  updateTransaction: (tx: Transaction) => void;
+  /** "local" = data only in this browser; otherwise the Supabase sync state. */
+  syncStatus: SyncStatus;
+  syncError: string | null;
+  /** Last rejected input (validation message), shown by the app shell. */
+  actionError: string | null;
+  clearActionError: () => void;
+  retrySync: () => void;
+  // helpers -- mutating helpers validate input and return the result
+  addTransaction: (tx: Omit<Transaction, "id">) => ValidationResult<Transaction>;
+  updateTransaction: (tx: Transaction) => ValidationResult<Transaction>;
   deleteTransaction: (id: string) => void;
   payCardBill: (cardId: string, amount: number) => void;
-  addCard: (card: Omit<CreditCard, "id">) => void;
-  updateCard: (card: CreditCard) => void;
+  addCard: (card: Omit<CreditCard, "id">) => ValidationResult<CreditCard>;
+  updateCard: (card: CreditCard) => ValidationResult<CreditCard>;
   deleteCard: (id: string) => void;
-  addLoan: (loan: Omit<Loan, "id">) => void;
-  updateLoan: (loan: Loan) => void;
+  addLoan: (loan: Omit<Loan, "id">) => ValidationResult<Loan>;
+  updateLoan: (loan: Loan) => ValidationResult<Loan>;
   deleteLoan: (id: string) => void;
-  addBudget: (budget: Omit<Budget, "id">) => void;
-  updateBudget: (budget: Budget) => void;
+  /** Pays this month's EMI for a loan: books a Loans expense and reduces what is owed. */
+  payEmi: (loanId: string) => void;
+  addBudget: (budget: Omit<Budget, "id">) => ValidationResult<Budget>;
+  updateBudget: (budget: Budget) => ValidationResult<Budget>;
   deleteBudget: (id: string) => void;
-  addGoal: (goal: Omit<Goal, "id">) => void;
-  updateGoal: (goal: Goal) => void;
+  addGoal: (goal: Omit<Goal, "id">) => ValidationResult<Goal>;
+  updateGoal: (goal: Goal) => ValidationResult<Goal>;
   deleteGoal: (id: string) => void;
   addCategory: (cat: string) => void;
   deleteCategory: (cat: string) => void;
@@ -229,185 +295,233 @@ interface FinancialContextType {
 
 const FinancialContext = createContext<FinancialContextType | undefined>(undefined);
 
-const STORAGE_KEY = "financial-controller-state";
+export const STORAGE_KEY = "financial-controller-state";
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
 }
 
+/** Reads the browser cache, drops invalid rows and re-categorises legacy "Other" rows. */
+function readLocalState(): FinancialState | null {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return null;
+    const { state, dropped } = sanitizeState(JSON.parse(saved));
+    if (dropped > 0) console.warn(`[storage] dropped ${dropped} invalid saved rows`);
+    state.transactions = state.transactions.map((tx) => {
+      if (tx.category === "Other" && tx.description) {
+        const result = detectCategory(tx.description, state.customMappings);
+        if (result.category !== "Other") return { ...tx, category: result.category };
+      }
+      return tx;
+    });
+    return state;
+  } catch {
+    return null; // corrupt JSON: start fresh rather than crash
+  }
+}
+
 // ─── Provider ───────────────────────────────────────────────────
 export function FinancialProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(financialReducer, initialState);
-  const [loaded, setLoaded] = React.useState(false);
+  const router = useRouter();
+  const [loaded, setLoaded] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("local");
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  // Load from localStorage
+  const stateRef = useRef(state);
+  const syncedRef = useRef<FinancialState | null>(null); // what the server holds; null = not syncing
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as FinancialState;
-        
-        // MIGRATION: Fix incorrect "Others" categories based on description
-        if (parsed.transactions && Array.isArray(parsed.transactions)) {
-          const loadedMappings = parsed.customMappings || {};
-          parsed.transactions = parsed.transactions.map(tx => {
-            if ((tx.category === "Other" || tx.category === "Others") && tx.description) {
-              const result = detectCategory(tx.description, loadedMappings);
-              if (result.category !== "Other") {
-                return { ...tx, category: result.category };
-              }
-            }
-            return tx;
-          });
-        }
+    stateRef.current = state;
+  }, [state]);
 
-        dispatch({ type: "LOAD_STATE", payload: { ...initialState, ...parsed } });
-      } else {
-        // No saved state, check system preference
-        const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-        if (!isDark) {
-          dispatch({ type: "SET_THEME", payload: "light" });
-        }
-      }
-    } catch {
-      // ignore parse errors
+  // 1. Hydrate from the browser cache (client only; localStorage does not exist during SSR)
+  useEffect(() => {
+    const local = readLocalState();
+    if (local) {
+      dispatch({ type: "LOAD_STATE", payload: local });
+    } else if (!window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      dispatch({ type: "SET_THEME", payload: "light" });
     }
-    setLoaded(true);
+    // Deferred so the hydrate dispatch above is applied before the first render with data.
+    queueMicrotask(() => setLoaded(true));
   }, []);
 
-  // Restore session from Supabase
-  useEffect(() => {
-    const restoreSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      
-      if (user) {
-        try {
-          // Store/Update user profile from OAuth data if needed
-          const { data: profile, error: profileError } = await supabase
-            .from("users")
-            .select("name")
-            .eq("auth_id", user.id)
-            .single();
-          
-          let userName = profile?.name;
-
-          if (profileError || !userName) {
-            userName = user.user_metadata?.full_name || user.email?.split("@")[0] || "User";
-            await supabase.from("users").upsert([
-              {
-                auth_id: user.id,
-                email: user.email,
-                name: userName
-              }
-            ]);
-          }
-          
-          dispatch({ 
-            type: "SET_USER", 
-            payload: { 
-              name: userName, 
-              monthlyIncome: state.user.monthlyIncome || 0,
-              isDemo: false
-            } 
-          });
-
-          // If we just arrived from an OAuth redirect, ensure onboarding is marked complete if profile exists
-          if (userName && !state.onboarded) {
-            dispatch({ type: "COMPLETE_ONBOARDING" });
-          }
-
-        } catch (err) {
-          console.error("Error restoring session:", err);
-        }
+  // 2. When signed in, load the user's rows from Postgres (or upload the local data once)
+  const connectRemote = useCallback(async (authId: string, email: string | undefined, fallbackName: string) => {
+    if (!isSupabaseConfigured) return;
+    setSyncStatus("loading");
+    try {
+      const remote = await loadRemote(supabase, authId);
+      const local = stateRef.current;
+      if (isRemoteEmpty(remote)) {
+        // First sign-in on this account: move what is in this browser to the database
+        // (sample data is never uploaded; the user starts onboarding fresh instead).
+        const seed: FinancialState = local.user.isDemo
+          ? { ...initialState, user: { name: fallbackName, monthlyIncome: 0, isDemo: false } }
+          : { ...local, user: { ...local.user, name: local.user.name || fallbackName, isDemo: false } };
+        const plan = planSync({ ...initialState, categories: [] }, seed);
+        plan.profile = { ...plan.profile!, email: email ?? null };
+        await applyPlan(supabase, plan);
+        dispatch({ type: "LOAD_STATE", payload: seed });
+        syncedRef.current = seed;
+      } else {
+        const fromDb = stateFromRemote(remote);
+        if (!fromDb.user.name) fromDb.user.name = fallbackName;
+        dispatch({ type: "LOAD_STATE", payload: fromDb });
+        syncedRef.current = fromDb;
       }
-    };
-    restoreSession();
-
-    // Listen for auth state changes (crucial for OAuth)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) restoreSession();
-    });
-
-    return () => subscription.unsubscribe();
-  }, [state.onboarded]);
-
-  // Persist to localStorage on every state change
-  useEffect(() => {
-    if (loaded) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      setSyncError(null);
+      setSyncStatus("synced");
+    } catch (err) {
+      syncedRef.current = null;
+      setSyncError(err instanceof Error ? err.message : String(err));
+      setSyncStatus("error");
     }
+  }, []);
+
+  useEffect(() => {
+    if (!loaded || !isSupabaseConfigured) return;
+    const start = (session: { user: { id: string; email?: string; user_metadata?: Record<string, unknown> } } | null) => {
+      if (!session) return;
+      const u = session.user;
+      const fallbackName = (u.user_metadata?.full_name as string | undefined) || u.email?.split("@")[0] || "User";
+      if (syncedRef.current === null) void connectRemote(u.id, u.email, fallbackName);
+    };
+    supabase.auth.getSession().then(({ data }) => start(data.session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        syncedRef.current = null;
+        setSyncStatus("local");
+      } else {
+        start(session);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [loaded, connectRemote]);
+
+  // 3. Write-through: after every change, send only the rows that changed
+  useEffect(() => {
+    if (!loaded) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); // offline cache
+    const synced = syncedRef.current;
+    if (!synced) return;
+    const plan = planSync(synced, state);
+    if (isEmptyPlan(plan)) return;
+    const target = state;
+    queueRef.current = queueRef.current
+      .then(async () => {
+        setSyncStatus("syncing");
+        await applyPlan(supabase, plan);
+        syncedRef.current = target;
+        setSyncError(null);
+        setSyncStatus("synced");
+      })
+      .catch((err) => {
+        // syncedRef keeps the last confirmed server state, so the next change
+        // (or retrySync) re-sends everything that did not make it.
+        setSyncError(err instanceof Error ? err.message : String(err));
+        setSyncStatus("error");
+      });
   }, [state, loaded]);
+
+  const retrySync = useCallback(() => {
+    const synced = syncedRef.current;
+    if (!synced) return;
+    const plan = planSync(synced, stateRef.current);
+    const target = stateRef.current;
+    queueRef.current = queueRef.current
+      .then(async () => {
+        setSyncStatus("syncing");
+        await applyPlan(supabase, plan);
+        syncedRef.current = target;
+        setSyncError(null);
+        setSyncStatus("synced");
+      })
+      .catch((err) => {
+        setSyncError(err instanceof Error ? err.message : String(err));
+        setSyncStatus("error");
+      });
+  }, []);
 
   // Theme sync
   useEffect(() => {
-    if (loaded) {
-      if (state.theme === "dark") {
-        document.documentElement.classList.add("dark");
-        document.documentElement.classList.remove("light");
-      } else {
-        document.documentElement.classList.add("light");
-        document.documentElement.classList.remove("dark");
-      }
-    }
+    if (!loaded) return;
+    document.documentElement.classList.toggle("dark", state.theme === "dark");
+    document.documentElement.classList.toggle("light", state.theme === "light");
   }, [state.theme, loaded]);
 
-  // ── Action helpers ──
-  const addTransaction = useCallback((tx: Omit<Transaction, "id">) => {
-    dispatch({ type: "ADD_TRANSACTION", payload: { ...tx, id: generateId() } });
+  // ── Action helpers (validate first; invalid input never reaches state or the database) ──
+  const guard = useCallback(<T,>(result: ValidationResult<T>, apply: (value: T) => void): ValidationResult<T> => {
+    if (result.ok) {
+      setActionError(null);
+      apply(result.value);
+    } else {
+      setActionError(result.error);
+    }
+    return result;
   }, []);
-  const updateTransaction = useCallback((tx: Transaction) => {
-    dispatch({ type: "UPDATE_TRANSACTION", payload: tx });
-  }, []);
+
+  const addTransaction = useCallback((tx: Omit<Transaction, "id">) =>
+    guard(validateTransaction({ ...tx, id: generateId() }), (v) => dispatch({ type: "ADD_TRANSACTION", payload: v })), [guard]);
+  const updateTransaction = useCallback((tx: Transaction) =>
+    guard(validateTransaction(tx), (v) => dispatch({ type: "UPDATE_TRANSACTION", payload: v })), [guard]);
   const deleteTransaction = useCallback((id: string) => {
     dispatch({ type: "DELETE_TRANSACTION", payload: id });
   }, []);
   const payCardBill = useCallback((cardId: string, amount: number) => {
+    if (!(amount > 0)) { setActionError("amount: Must be greater than 0"); return; }
     dispatch({ type: "PAY_CARD_BILL", payload: { cardId, amount } });
   }, []);
 
-  const addCard = useCallback((card: Omit<CreditCard, "id">) => {
-    dispatch({ type: "ADD_CARD", payload: { ...card, id: generateId() } });
-  }, []);
-  const updateCard = useCallback((card: CreditCard) => {
-    dispatch({ type: "UPDATE_CARD", payload: card });
-  }, []);
+  const addCard = useCallback((card: Omit<CreditCard, "id">) =>
+    guard(validateCard({ ...card, id: generateId() }), (v) => dispatch({ type: "ADD_CARD", payload: v })), [guard]);
+  const updateCard = useCallback((card: CreditCard) =>
+    guard(validateCard(card), (v) => dispatch({ type: "UPDATE_CARD", payload: v })), [guard]);
   const deleteCard = useCallback((id: string) => {
     dispatch({ type: "DELETE_CARD", payload: id });
   }, []);
 
-  const addLoan = useCallback((loan: Omit<Loan, "id">) => {
-    dispatch({ type: "ADD_LOAN", payload: { ...loan, id: generateId() } });
-  }, []);
-  const updateLoan = useCallback((loan: Loan) => {
-    dispatch({ type: "UPDATE_LOAN", payload: loan });
-  }, []);
+  const addLoan = useCallback((loan: Omit<Loan, "id">) =>
+    guard(validateLoan({ ...loan, id: generateId() }), (v) => dispatch({ type: "ADD_LOAN", payload: v })), [guard]);
+  const updateLoan = useCallback((loan: Loan) =>
+    guard(validateLoan(loan), (v) => dispatch({ type: "UPDATE_LOAN", payload: v })), [guard]);
   const deleteLoan = useCallback((id: string) => {
     dispatch({ type: "DELETE_LOAN", payload: id });
   }, []);
 
+  const payEmi = useCallback((loanId: string) => {
+    dispatch({ type: "PAY_EMI", payload: { loanId, txId: generateId(), date: todayISO() } });
+  }, []);
+
   const addBudget = useCallback((budget: Omit<Budget, "id">) => {
-    dispatch({ type: "ADD_BUDGET", payload: { ...budget, id: generateId() } });
-  }, []);
-  const updateBudget = useCallback((budget: Budget) => {
-    dispatch({ type: "UPDATE_BUDGET", payload: budget });
-  }, []);
+    if (stateRef.current.budgets.some((b) => b.category === budget.category)) {
+      const r: ValidationResult<Budget> = { ok: false, error: `category: a ${budget.category} budget already exists` };
+      setActionError(r.error);
+      return r;
+    }
+    return guard(validateBudget({ ...budget, id: generateId() }), (v) => dispatch({ type: "ADD_BUDGET", payload: v }));
+  }, [guard]);
+  const updateBudget = useCallback((budget: Budget) =>
+    guard(validateBudget(budget), (v) => dispatch({ type: "UPDATE_BUDGET", payload: v })), [guard]);
   const deleteBudget = useCallback((id: string) => {
     dispatch({ type: "DELETE_BUDGET", payload: id });
   }, []);
 
-  const addGoal = useCallback((goal: Omit<Goal, "id">) => {
-    dispatch({ type: "ADD_GOAL", payload: { ...goal, id: generateId() } });
-  }, []);
-  const updateGoal = useCallback((goal: Goal) => {
-    dispatch({ type: "UPDATE_GOAL", payload: goal });
-  }, []);
+  const addGoal = useCallback((goal: Omit<Goal, "id">) =>
+    guard(validateGoal({ ...goal, id: generateId() }), (v) => dispatch({ type: "ADD_GOAL", payload: v })), [guard]);
+  const updateGoal = useCallback((goal: Goal) =>
+    guard(validateGoal(goal), (v) => dispatch({ type: "UPDATE_GOAL", payload: v })), [guard]);
   const deleteGoal = useCallback((id: string) => {
     dispatch({ type: "DELETE_GOAL", payload: id });
   }, []);
 
   const addCategory = useCallback((cat: string) => {
-    dispatch({ type: "ADD_CATEGORY", payload: cat });
+    const name = cat.trim();
+    if (name) dispatch({ type: "ADD_CATEGORY", payload: name });
   }, []);
   const deleteCategory = useCallback((cat: string) => {
     dispatch({ type: "DELETE_CATEGORY", payload: cat });
@@ -421,36 +535,39 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "SET_USER", payload: user });
   }, []);
   const setBalance = useCallback((balance: number) => {
-    dispatch({ type: "SET_BALANCE", payload: balance });
+    if (Number.isFinite(balance)) dispatch({ type: "SET_BALANCE", payload: balance });
   }, []);
   const completeOnboarding = useCallback(() => {
     dispatch({ type: "COMPLETE_ONBOARDING" });
   }, []);
   const toggleTheme = useCallback(() => {
-    const newTheme = state.theme === "dark" ? "light" : "dark";
-    dispatch({ type: "SET_THEME", payload: newTheme });
-    if (newTheme === "dark") {
-      document.documentElement.classList.add("dark");
-      document.documentElement.classList.remove("light");
-    } else {
-      document.documentElement.classList.add("light");
-      document.documentElement.classList.remove("dark");
-    }
-  }, [state.theme]);
-
-  const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
-    localStorage.clear(); // Clear all localStorage as requested
-    window.location.href = "/"; // Full reload to clear all state and redirect
+    dispatch({ type: "SET_THEME", payload: stateRef.current.theme === "dark" ? "light" : "dark" });
   }, []);
 
-  if (!loaded) return null; // avoid flash
+  const signOut = useCallback(async () => {
+    await queueRef.current; // let pending writes finish
+    syncedRef.current = null; // stop syncing before the state is cleared
+    if (isSupabaseConfigured) await supabase.auth.signOut();
+    localStorage.removeItem(STORAGE_KEY); // only this app's cache, not every site key
+    dispatch({ type: "SIGN_OUT" }); // back to an empty, not-onboarded state
+    setSyncStatus("local");
+    router.replace("/");
+  }, [router]);
+
+  const clearActionError = useCallback(() => setActionError(null), []);
+
+  if (!loaded) return null; // avoid a flash of empty state before hydration
 
   return (
     <FinancialContext.Provider
       value={{
         state,
         dispatch,
+        syncStatus,
+        syncError,
+        actionError,
+        clearActionError,
+        retrySync,
         addTransaction,
         updateTransaction,
         deleteTransaction,
@@ -461,6 +578,7 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
         addLoan,
         updateLoan,
         deleteLoan,
+        payEmi,
         addBudget,
         updateBudget,
         deleteBudget,

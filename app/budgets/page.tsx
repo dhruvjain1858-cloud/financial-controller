@@ -64,7 +64,7 @@ export default function BudgetsPage() {
                         isOver ? "bg-danger/10 text-danger" : isWarning ? "bg-warning/10 text-warning" : "bg-success/10 text-success")}>
                         {Math.round(pct)}%
                       </span>
-                      <button onClick={() => deleteBudget(budget.id)}
+                      <button onClick={() => deleteBudget(budget.id)} aria-label={`Delete ${budget.category} budget`}
                         className="p-1.5 hover:bg-danger/10 rounded-lg transition-colors text-muted-foreground hover:text-danger">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>

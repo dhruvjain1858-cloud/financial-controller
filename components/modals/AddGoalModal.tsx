@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { todayISO } from "@/utils/helpers";
 import { Modal } from "@/components/Modal";
 import { useFinancial } from "@/context/FinancialContext";
-import { todayISO } from "@/utils/helpers";
+
 import { CurrencyInput } from "@/components/CurrencyInput";
 
 interface Props {
@@ -24,12 +25,14 @@ export function AddGoalModal({ isOpen, onClose }: Props) {
     const t = Number(target);
     if (!t || t <= 0) { setError("Enter a valid target amount"); return; }
     if (!deadline) { setError("Set a deadline"); return; }
-    addGoal({
+    if (deadline < todayISO()) { setError("The deadline cannot be in the past"); return; }
+    const result = addGoal({
       title: title.trim(),
       targetAmount: t,
       savedAmount: Number(saved) || 0,
       deadline,
     });
+    if (!result.ok) { setError(result.error); return; }
     setTitle("");
     setTarget("");
     setSaved("0");
@@ -74,6 +77,7 @@ export function AddGoalModal({ isOpen, onClose }: Props) {
           <label className="text-sm text-muted-foreground block mb-1.5">Deadline *</label>
           <input
             type="date"
+            min={todayISO()}
             value={deadline}
             onChange={(e) => { setDeadline(e.target.value); setError(""); }}
             className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary transition-all"

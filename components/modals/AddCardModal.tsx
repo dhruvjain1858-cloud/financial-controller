@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Modal } from "@/components/Modal";
 import { useFinancial } from "@/context/FinancialContext";
 import { CurrencyInput } from "@/components/CurrencyInput";
@@ -14,25 +14,12 @@ interface Props {
 
 export function AddCardModal({ isOpen, onClose, editCard }: Props) {
   const { addCard, updateCard } = useFinancial();
-  const [name, setName] = useState("");
-  const [network, setNetwork] = useState("Visa");
-  const [limit, setLimit] = useState("");
-  const [used, setUsed] = useState("");
+  // Initialised from props; the parent remounts this modal (key) when editCard changes.
+  const [name, setName] = useState(editCard?.name ?? "");
+  const [network, setNetwork] = useState(editCard?.network ?? "Visa");
+  const [limit, setLimit] = useState(editCard ? editCard.limit.toString() : "");
+  const [used, setUsed] = useState(editCard ? editCard.used.toString() : "");
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (editCard) {
-      setName(editCard.name);
-      setNetwork(editCard.network);
-      setLimit(editCard.limit.toString());
-      setUsed(editCard.used.toString());
-    } else {
-      setName("");
-      setNetwork("Visa");
-      setLimit("");
-      setUsed("");
-    }
-  }, [editCard, isOpen]);
 
   const handleSubmit = () => {
     if (!name.trim()) { setError("Card name is required"); return; }
@@ -42,9 +29,11 @@ export function AddCardModal({ isOpen, onClose, editCard }: Props) {
     if (use < 0) { setError("Used amount cannot be negative"); return; }
 
     if (editCard) {
-      updateCard({ ...editCard, name: name.trim(), network, limit: lim, used: use });
+      const result = updateCard({ ...editCard, name: name.trim(), network, limit: lim, used: use });
+      if (!result.ok) { setError(result.error); return; }
     } else {
-      addCard({ name: name.trim(), network, limit: lim, used: use });
+      const result = addCard({ name: name.trim(), network, limit: lim, used: use });
+      if (!result.ok) { setError(result.error); return; }
     }
     setError("");
     onClose();

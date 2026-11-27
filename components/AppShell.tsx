@@ -5,6 +5,7 @@ import { FinancialProvider } from "@/context/FinancialContext";
 import { Sidebar } from "@/components/Sidebar";
 import { Navbar } from "@/components/Navbar";
 import { OnboardingFlow } from "@/components/modals/OnboardingFlow";
+import { StatusBar } from "@/components/StatusBar";
 import { usePathname } from "next/navigation";
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -21,6 +22,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className={isAuthPage ? "w-full" : "md:ml-64 flex-1 flex flex-col min-h-screen pb-16 md:pb-0"}>
         {!isAuthPage && <Navbar />}
         <main className={isAuthPage ? "w-full" : "flex-1 p-4 md:p-8 z-10 max-w-7xl mx-auto w-full"}>
+          {!isAuthPage && <StatusBar />}
           {children}
         </main>
       </div>

@@ -14,7 +14,6 @@ export function detectCategory(
   // 1. Check custom mappings (Exact match -> HIGH)
   for (const [customDesc, mappedCat] of Object.entries(customMappings)) {
     if (lower === customDesc || lower.includes(customDesc)) {
-      console.log(`[Categorization] Input: "${description}" -> Custom Mapped: "${mappedCat}" (HIGH)`);
       return { category: mappedCat, confidence: "HIGH" };
     }
   }
@@ -31,9 +30,11 @@ export function detectCategory(
   let category = "Other";
   let confidence: "MEDIUM" | "LOW" = "LOW";
 
-  const words = lower.split(/\s+/);
-  
-  const checkMatch = (keywords: string[]) => keywords.some(k => words.includes(k) || lower.includes(k));
+  // Whole-word match: substring matching misfiled "parent" as Housing (rent),
+  // "training" as Transport (train) and "pride" as Transport (ride).
+  const hasWord = (k: string) =>
+    new RegExp(`(^|[^a-z0-9])${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(lower);
+  const checkMatch = (keywords: string[]) => keywords.some(hasWord);
 
   if (checkMatch(foodKeywords)) category = "Food";
   else if (checkMatch(transportKeywords)) category = "Transport";
@@ -42,12 +43,10 @@ export function detectCategory(
   else if (checkMatch(entertainmentKeywords)) category = "Entertainment";
   else if (checkMatch(healthKeywords)) category = "Healthcare";
   else if (checkMatch(loanKeywords)) category = "Loans";
-  else if (lower.includes("salary")) category = "Salary";
-  else if (lower.includes("freelance")) category = "Freelance";
+  else if (hasWord("salary")) category = "Salary";
+  else if (hasWord("freelance")) category = "Freelance";
 
   if (category !== "Other") confidence = "MEDIUM";
-
-  console.log(`[Categorization] Input: "${description}" -> Detected: "${category}" (${confidence})`);
   return { category, confidence };
 }
 

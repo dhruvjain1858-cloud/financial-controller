@@ -1,7 +1,15 @@
-import { FinancialState, AppAlert, CATEGORY_COLORS, Transaction } from "@/types";
+import { FinancialState, AppAlert, CATEGORY_COLORS, Loan, Transaction } from "@/types";
+import { localISODate, localMonthKey } from "@/utils/helpers";
+import { transactionsToCSV } from "@/utils/csv";
+
+/** Percentage of `part` in `whole`; 0 when `whole` is not positive (avoids NaN/Infinity). */
+export function safePct(part: number, whole: number): number {
+  return whole > 0 ? (part / whole) * 100 : 0;
+}
 
 export function getRiskLevel(used: number, limit: number): "low" | "medium" | "high" {
-  const pct = (used / limit) * 100;
+  if (limit <= 0) return used > 0 ? "high" : "low";
+  const pct = safePct(used, limit);
   if (pct < 30) return "low";
   if (pct <= 70) return "medium";
   return "high";
@@ -10,6 +18,72 @@ export function getRiskLevel(used: number, limit: number): "low" | "medium" | "h
 export function getRealBalance(state: FinancialState): number {
   const totalCreditCardOutstanding = state.cards.reduce((sum, card) => sum + card.used, 0);
   return state.balance - totalCreditCardOutstanding;
+}
+
+/** A loan's EMI is due this month if it is still running and not yet paid this month. */
+export function isEmiDue(loan: Loan, month: string = localMonthKey()): boolean {
+  return loan.remaining > 0 && loan.monthsRemaining > 0 && loan.lastPaidMonth !== month;
+}
+
+/** EMIs still to be paid this month (paid ones are already out of the balance). */
+export function getTotalEmi(state: FinancialState, month: string = localMonthKey()): number {
+  return state.loans.filter((l) => isEmiDue(l, month)).reduce((s, l) => s + Math.min(l.emi, l.remaining), 0);
+}
+
+/**
+ * Splits one EMI into interest and principal (reducing-balance method):
+ * interest = outstanding x annual rate / 12, principal = EMI - interest.
+ * The last instalment is capped at what is left.
+ */
+export function splitEmi(loan: Loan): { interest: number; principal: number; payment: number } {
+  const interest = Math.round(((loan.remaining * loan.interest) / 1200) * 100) / 100;
+  const principal = Math.max(0, Math.min(loan.remaining, loan.emi - interest));
+  return { interest, principal, payment: Math.round((principal + interest) * 100) / 100 };
+}
+
+/** Real balance left after this month's remaining EMIs are paid (negative = shortfall). */
+export function getBalanceAfterEmi(state: FinancialState): number {
+  return getRealBalance(state) - getTotalEmi(state);
+}
+
+/**
+ * How much can be spent this month without touching money already committed:
+ * a share (30% with a stated income, else 20%) of the balance left after card
+ * dues and EMIs. Never negative.
+ */
+export function getSafeSpendingLimit(state: FinancialState): number {
+  const share = state.user.monthlyIncome > 0 ? 0.3 : 0.2;
+  return Math.max(0, getBalanceAfterEmi(state)) * share;
+}
+
+export type Affordability = {
+  status: "safe" | "warning" | "danger";
+  message: string;
+  /** Real balance after this purchase AND this month's EMIs still due. */
+  afterBalance: number;
+  /** Combined card utilisation (%) if the purchase goes on a card; null without cards. */
+  utilizationIfCard: number | null;
+};
+
+/**
+ * "Can I afford this?" using the same numbers as the dashboard:
+ *  safe    -> within the safe spending limit
+ *  warning -> affordable, but eats into money that is not committed yet
+ *  danger  -> would leave less than this month's remaining EMIs need
+ */
+export function assessAffordability(state: FinancialState, amount: number): Affordability | null {
+  if (!(amount > 0) || !Number.isFinite(amount)) return null;
+  const afterBalance = getBalanceAfterEmi(state) - amount;
+  const totalLimit = state.cards.reduce((s, c) => s + c.limit, 0);
+  const totalUsed = state.cards.reduce((s, c) => s + c.used, 0);
+  const utilizationIfCard = totalLimit > 0 ? Math.round(safePct(totalUsed + amount, totalLimit)) : null;
+  if (amount <= getSafeSpendingLimit(state)) {
+    return { status: "safe", message: "Within your safe spending limit after card dues and EMIs.", afterBalance, utilizationIfCard };
+  }
+  if (afterBalance >= 0) {
+    return { status: "warning", message: "Affordable, but above your safe spending limit. It leaves a thin buffer this month.", afterBalance, utilizationIfCard };
+  }
+  return { status: "danger", message: "Not recommended: you would not have enough left for card dues and this month's EMIs.", afterBalance, utilizationIfCard };
 }
 
 export function getHealthScore(state: FinancialState): number {
@@ -26,14 +100,14 @@ export function getHealthScore(state: FinancialState): number {
   if (state.cards.length > 0) {
     const totalLimit = state.cards.reduce((s, c) => s + c.limit, 0);
     const totalUsed = state.cards.reduce((s, c) => s + c.used, 0);
-    const utilization = totalUsed / totalLimit;
+    const utilization = Math.min(1, safePct(totalUsed, totalLimit) / 100);
     score += Math.round((1 - utilization) * 15);
   } else {
     score += 15;
   }
 
   // Spending discipline (0-15 pts)
-  const thisMonth = new Date().toISOString().slice(0, 7);
+  const thisMonth = localMonthKey();
   const monthlyExpenses = state.transactions
     .filter((t) => t.type === "expense" && t.date.startsWith(thisMonth))
     .reduce((s, t) => s + t.amount, 0);
@@ -48,14 +122,14 @@ export function getHealthScore(state: FinancialState): number {
 }
 
 export function getMonthlyExpenses(transactions: Transaction[]): number {
-  const thisMonth = new Date().toISOString().slice(0, 7);
+  const thisMonth = localMonthKey();
   return transactions
     .filter((t) => t.type === "expense" && t.date.startsWith(thisMonth))
     .reduce((s, t) => s + t.amount, 0);
 }
 
 export function getMonthlyIncome(transactions: Transaction[]): number {
-  const thisMonth = new Date().toISOString().slice(0, 7);
+  const thisMonth = localMonthKey();
   return transactions
     .filter((t) => t.type === "income" && t.date.startsWith(thisMonth))
     .reduce((s, t) => s + t.amount, 0);
@@ -65,7 +139,7 @@ export function getBudgetUsage(
   transactions: Transaction[],
   category: string
 ): number {
-  const thisMonth = new Date().toISOString().slice(0, 7);
+  const thisMonth = localMonthKey();
   return transactions
     .filter(
       (t) =>
@@ -77,7 +151,7 @@ export function getBudgetUsage(
 }
 
 export function getSpendingByCategory(transactions: Transaction[]) {
-  const thisMonth = new Date().toISOString().slice(0, 7);
+  const thisMonth = localMonthKey();
   const expenses = transactions.filter(
     (t) => t.type === "expense" && t.date.startsWith(thisMonth)
   );
@@ -101,7 +175,7 @@ export function getWeeklyTrend(transactions: Transaction[]) {
   for (let i = 6; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split("T")[0];
+    const dateStr = localISODate(d);
     const total = transactions
       .filter((t) => t.type === "expense" && t.date === dateStr)
       .reduce((s, t) => s + t.amount, 0);
@@ -129,7 +203,7 @@ export function generateAlerts(state: FinancialState): AppAlert[] {
 
   // High credit utilization
   state.cards.forEach((card) => {
-    const util = (card.used / card.limit) * 100;
+    const util = safePct(card.used, card.limit);
     if (util > 70) {
       alerts.push({
         id: `alert-card-${card.id}`,
@@ -168,7 +242,7 @@ export function generateAlerts(state: FinancialState): AppAlert[] {
   // Budget warnings
   state.budgets.forEach((b) => {
     const used = getBudgetUsage(state.transactions, b.category);
-    const pct = (used / b.limit) * 100;
+    const pct = safePct(used, b.limit);
     if (pct >= 100) {
       alerts.push({
         id: `alert-budget-exceeded-${b.id}`,
@@ -191,13 +265,13 @@ export function generateAlerts(state: FinancialState): AppAlert[] {
   });
 
   // EMI reminders
-  const totalEmi = state.loans.reduce((s, l) => s + l.emi, 0);
+  const totalEmi = getTotalEmi(state);
   if (totalEmi > 0) {
     alerts.push({
       id: "alert-emi",
       type: "info",
       title: "Upcoming EMI Payments",
-      description: `Total EMI of ₹${totalEmi.toLocaleString("en-IN")} is due this month. Ensure sufficient balance.`,
+      description: `EMIs of ₹${totalEmi.toLocaleString("en-IN")} are still due this month. Ensure sufficient balance.`,
       createdAt: now,
       read: false,
     });
@@ -205,7 +279,7 @@ export function generateAlerts(state: FinancialState): AppAlert[] {
 
   // Goals nearing completion
   state.goals.forEach((g) => {
-    const pct = (g.savedAmount / g.targetAmount) * 100;
+    const pct = safePct(g.savedAmount, g.targetAmount);
     if (pct >= 90 && pct < 100) {
       alerts.push({
         id: `alert-goal-${g.id}`,
@@ -230,8 +304,8 @@ export function generateInsights(state: FinancialState): string[] {
     insights.push(`Your highest expense category this month is ${spending[0].name} at ₹${spending[0].value.toLocaleString("en-IN")}.`);
   }
 
-  // 2. Frequency pattern matching (AI-like)
-  const todayStr = new Date().toISOString().split("T")[0];
+  // 2. Frequency pattern matching
+  const todayStr = localISODate();
   const todayTx = state.transactions.filter(t => t.type === "expense" && t.date === todayStr);
   
   const categoryCountToday: Record<string, number> = {};
@@ -245,7 +319,7 @@ export function generateInsights(state: FinancialState): string[] {
     }
   }
 
-  // 3. Night time or frequent Swiggy behavior (simulation of pattern detection)
+  // 3. Frequent Swiggy orders
   const swiggyCount = state.transactions.filter(t => t.description?.toLowerCase().includes("swiggy")).length;
   if (swiggyCount > 3) {
     insights.push(`You frequently spend on Swiggy. Consider setting a specific Food budget to control this habit.`);
@@ -263,9 +337,9 @@ export function generateInsights(state: FinancialState): string[] {
     insights.push(`You have used ${pct}% of your monthly income on expenses so far.`);
   }
 
-  const totalEmi = state.loans.reduce((s, l) => s + l.emi, 0);
+  const totalEmi = getTotalEmi(state);
   if (totalEmi > 0) {
-    const afterEmi = getRealBalance(state) - totalEmi;
+    const afterEmi = getBalanceAfterEmi(state);
     insights.push(
       afterEmi > 0
         ? `After EMI payments, your projected real balance will be ₹${afterEmi.toLocaleString("en-IN")}.`
@@ -290,7 +364,7 @@ export function generateInsights(state: FinancialState): string[] {
   if (state.cards.length > 0) {
     const totalUsed = state.cards.reduce((s, c) => s + c.used, 0);
     const totalLimit = state.cards.reduce((s, c) => s + c.limit, 0);
-    const utilization = Math.round((totalUsed / totalLimit) * 100);
+    const utilization = Math.round(safePct(totalUsed, totalLimit));
     insights.push(`Your overall credit utilization is ${utilization}%. ${utilization > 50 ? "Consider reducing usage." : "Looking healthy."}`);
   }
 
@@ -298,20 +372,12 @@ export function generateInsights(state: FinancialState): string[] {
 }
 
 export function exportToCSV(transactions: Transaction[]): void {
-  const headers = ["Date", "Type", "Category", "Amount", "Description"];
-  const rows = transactions.map((t) => [
-    t.date,
-    t.type,
-    t.category,
-    t.amount.toString(),
-    t.description || "",
-  ]);
-  const csv = [headers, ...rows].map((row) => row.join(",")).join("\n");
+  const csv = transactionsToCSV(transactions);
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `transactions-${new Date().toISOString().split("T")[0]}.csv`;
+  a.download = `transactions-${localISODate()}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }

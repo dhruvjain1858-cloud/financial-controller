@@ -4,7 +4,7 @@ import { Bell, User, Zap, Moon, Sun, Plus, Minus, LogOut, Settings, UploadCloud 
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useRef, useEffect } from "react";
 import { useFinancial } from "@/context/FinancialContext";
-import { generateAlerts, getRealBalance } from "@/utils/calculations";
+import { generateAlerts, assessAffordability } from "@/utils/calculations";
 import { AddExpenseModal } from "@/components/modals/AddExpenseModal";
 import { AddIncomeModal } from "@/components/modals/AddIncomeModal";
 import { EditProfileModal } from "@/components/modals/EditProfileModal";
@@ -52,36 +52,38 @@ export const Navbar = () => {
 
         <div className="flex items-center gap-2 md:gap-3">
           <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowImport(true)}
-            className="hidden sm:flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 text-primary px-3 py-1.5 rounded-full text-xs font-medium transition-all">
-            <UploadCloud className="w-3 h-3" /> <span>Import</span>
+            aria-label="Import CSV"
+            className="flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 text-primary px-3 py-1.5 rounded-full text-xs font-medium transition-all">
+            <UploadCloud className="w-3 h-3" /> <span className="hidden sm:inline">Import</span>
           </motion.button>
 
-          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowExpense(true)}
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowExpense(true)} aria-label="Add expense"
             className="flex items-center gap-1.5 bg-danger/10 hover:bg-danger/20 text-danger px-3 py-1.5 rounded-full text-xs font-medium transition-all">
             <Minus className="w-3 h-3" /> <span className="hidden sm:inline">Expense</span>
           </motion.button>
 
-          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowIncome(true)}
+          <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setShowIncome(true)} aria-label="Add income"
             className="flex items-center gap-1.5 bg-success/10 hover:bg-success/20 text-success px-3 py-1.5 rounded-full text-xs font-medium transition-all">
             <Plus className="w-3 h-3" /> <span className="hidden sm:inline">Income</span>
           </motion.button>
 
           <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => setAffordOpen(true)}
-            className="hidden md:flex items-center gap-1.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white px-3 py-1.5 rounded-full text-xs font-medium shadow-lg shadow-blue-500/20 transition-all">
-            <Zap className="w-3 h-3" /> Affordability
+            aria-label="Affordability"
+            className="flex items-center gap-1.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white px-3 py-1.5 rounded-full text-xs font-medium shadow-lg shadow-blue-500/20 transition-all">
+            <Zap className="w-3 h-3" /> <span className="hidden md:inline">Affordability</span>
           </motion.button>
 
-          <button onClick={toggleTheme} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-white/5">
+          <button onClick={toggleTheme} aria-label={state.theme === "dark" ? "Switch to light theme" : "Switch to dark theme"} className="p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-white/5">
             {state.theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
-          <Link href="/alerts" className="relative p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-white/5">
+          <Link href="/alerts" aria-label="Alerts" className="relative p-1.5 text-muted-foreground hover:text-foreground transition-colors rounded-full hover:bg-white/5">
             <Bell className="w-4 h-4" />
             {dangerCount > 0 && <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-danger rounded-full animate-pulse-slow" />}
           </Link>
 
           <div className="relative" ref={profileRef}>
-            <button onClick={() => setShowProfile(!showProfile)}
+            <button onClick={() => setShowProfile(!showProfile)} aria-label="Account menu" aria-expanded={showProfile}
               className="w-7 h-7 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 p-[1.5px] transition-transform hover:scale-105">
               <div className="w-full h-full rounded-full bg-card flex items-center justify-center">
                 <span className="text-[10px] font-bold text-muted-foreground">
@@ -128,28 +130,8 @@ function AffordabilityModal({ isOpen, onClose }: { isOpen: boolean; onClose: () 
   const { state } = useFinancial();
   const [amount, setAmount] = useState("");
 
-  const totalCardUsed = state.cards.reduce((s, c) => s + c.used, 0);
   const totalCardLimit = state.cards.reduce((s, c) => s + c.limit, 0);
-
-  const simulate = () => {
-    const num = Number(amount);
-    if (!num || num <= 0) return null;
-    
-    // Core Affordability change: Use Real Balance
-    const realBalance = getRealBalance(state);
-    const safeMargin = realBalance * 0.3;
-    const afterBalance = realBalance - num;
-    const newUtil = totalCardLimit > 0 ? Math.round(((totalCardUsed + num) / totalCardLimit) * 100) : 0;
-
-    if (num <= realBalance - safeMargin && num < realBalance * 0.5) {
-      return { status: "safe" as const, message: "Safe to proceed. This won't impact your financial safety.", afterBalance, newUtil };
-    } else if (num <= realBalance) {
-      return { status: "warning" as const, message: "This purchase eats into your safety margin. Proceed with caution.", afterBalance, newUtil };
-    }
-    return { status: "danger" as const, message: "Not recommended. This will push your real balance into deficit.", afterBalance, newUtil };
-  };
-
-  const sim = simulate();
+  const sim = assessAffordability(state, Number(amount));
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Can I Afford This?">
@@ -159,6 +141,7 @@ function AffordabilityModal({ isOpen, onClose }: { isOpen: boolean; onClose: () 
           value={amount}
           onChange={(v) => setAmount(v)}
           placeholder="0"
+          ariaLabel="Purchase amount"
           large
         />
         {sim && (
@@ -168,13 +151,13 @@ function AffordabilityModal({ isOpen, onClose }: { isOpen: boolean; onClose: () 
               description={sim.message} />
             <div className="mt-4 space-y-2.5 p-4 rounded-xl bg-card border border-border/50">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">After Purchase Real Balance</span>
+                <span className="text-muted-foreground">Left after purchase, card dues and EMIs</span>
                 <span className={cn("font-semibold", sim.afterBalance < 0 ? "text-danger" : "text-foreground")}>{formatCurrency(sim.afterBalance)}</span>
               </div>
-              {totalCardLimit > 0 && (
+              {totalCardLimit > 0 && sim.utilizationIfCard !== null && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Credit Utilization</span>
-                  <span className={cn("font-semibold", sim.newUtil > 70 ? "text-danger" : sim.newUtil > 50 ? "text-warning" : "text-success")}>{sim.newUtil}%</span>
+                  <span className="text-muted-foreground">Card utilisation if paid by card</span>
+                  <span className={cn("font-semibold", sim.utilizationIfCard > 70 ? "text-danger" : sim.utilizationIfCard > 50 ? "text-warning" : "text-success")}>{sim.utilizationIfCard}%</span>
                 </div>
               )}
             </div>

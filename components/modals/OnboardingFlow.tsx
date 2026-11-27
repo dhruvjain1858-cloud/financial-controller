@@ -3,8 +3,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useFinancial } from "@/context/FinancialContext";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mail, Phone, Lock, ArrowRight, CheckCircle2, Shield, User, Loader2, Eye, EyeOff, KeyRound } from "lucide-react";
-import { supabase } from "@/lib/supabaseClient";
+import { Mail, Phone, Lock, ArrowRight, CheckCircle2, Shield, User, Loader2, KeyRound } from "lucide-react";
+import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
+import { buildDemoState } from "@/lib/demoData";
+import { errorMessage, errorName } from "@/utils/errors";
 import { CurrencyInput } from "@/components/CurrencyInput";
 
 const GOOGLE_SVG = (
@@ -43,33 +45,9 @@ function maskIdentifier(id: string, isEmail: boolean) {
   return `+91 ******${digits.slice(-4)}`;
 }
 
-// ── Upsert user into Supabase "users" table ──
-async function upsertUserRecord(userId: string, email: string) {
-  try {
-    const { data: existingUser } = await supabase
-      .from("users")
-      .select("*")
-      .eq("auth_id", userId)
-      .single();
-
-    if (!existingUser) {
-      await supabase.from("users").insert([
-        {
-          auth_id: userId,
-          email: email,
-          name: email.split("@")[0],
-        },
-      ]);
-      console.log("New user record created in DB");
-    }
-  } catch (err) {
-    console.warn("Could not upsert user record:", err);
-  }
-}
-
 // ── Component ──
 export function OnboardingFlow() {
-  const { state, setUser, setBalance, completeOnboarding, dispatch } = useFinancial();
+  const { state, dispatch, setUser, setBalance, completeOnboarding } = useFinancial();
 
   // Flow state
   const [step, setStep] = useState(0); // 0=auth, 1=profile, 2=financial
@@ -94,6 +72,19 @@ export function OnboardingFlow() {
 
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
+  // Already signed in (e.g. back from Google OAuth) but not onboarded: go straight to the profile step.
+  useEffect(() => {
+    if (!isSupabaseConfigured || state.onboarded) return;
+    let cancelled = false;
+    supabase.auth.getSession().then(({ data }) => {
+      const user = data.session?.user;
+      if (cancelled || !user) return;
+      setName((current) => current || (user.user_metadata?.full_name as string | undefined) || "");
+      setStep((s) => (s === 0 ? 1 : s));
+    });
+    return () => { cancelled = true; };
+  }, [state.onboarded]);
+
   useEffect(() => {
     if (resendCooldown <= 0) return;
     const t = setTimeout(() => setResendCooldown(c => c - 1), 1000);
@@ -115,7 +106,6 @@ export function OnboardingFlow() {
     setLoading(true);
     try {
       const formattedId = loginType === "email" ? val : formatPhone(val);
-      console.log(`Attempting to send OTP to ${loginType}:`, formattedId, "Mode:", authMode);
 
       // We use shouldCreateUser: true for both to avoid "User not found" errors.
       const { error } = await supabase.auth.signInWithOtp(
@@ -129,15 +119,14 @@ export function OnboardingFlow() {
         throw error;
       }
 
-      console.log("OTP sent successfully!");
       setOtpSent(true);
       setResendCooldown(30);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Catch Error during OTP Send:", err);
-      if (err.name === 'AuthRetryableFetchError') {
+      if (errorName(err) === 'AuthRetryableFetchError') {
         setError("Network error: Could not reach Supabase. Please check your internet connection or disable any ad-blockers.");
       } else {
-        setError(err.message || "Failed to send OTP");
+        setError(errorMessage(err, "Failed to send OTP"));
       }
     } finally {
       setLoading(false);
@@ -160,22 +149,23 @@ export function OnboardingFlow() {
 
       const { data, error } = await supabase.auth.verifyOtp(
         loginType === "email"
-          ? { email: formattedId, token: code, type: verifyType as any }
+          ? { email: formattedId, token: code, type: verifyType as "signup" | "email" }
           : { phone: formattedId, token: code, type: "sms" }
       );
 
       if (error) throw error;
 
       if (data.user) {
-        await upsertUserRecord(data.user.id, data.user.email || identifier);
+        // The fc_profiles row is created by the sync layer (FinancialContext) on sign-in;
+        // the legacy public.users table is deliberately never written.
         const userName = data.user.user_metadata?.full_name || data.user.email?.split("@")[0] || "User";
         setName(userName);
       }
 
       setOtpSent(false);
       setStep(1);
-    } catch (err: any) {
-      setError(err.message || "Invalid or expired OTP");
+    } catch (err: unknown) {
+      setError(errorMessage(err, "Invalid or expired OTP"));
     } finally {
       setLoading(false);
     }
@@ -190,25 +180,40 @@ export function OnboardingFlow() {
         options: { redirectTo: window.location.origin },
       });
       if (error) throw error;
-    } catch (err: any) {
+    } catch (err: unknown) {
       setGoogleLoading(false);
-      setError(err.message || "Failed to connect with Google.");
+      setError(errorMessage(err, "Failed to connect with Google."));
     }
   };
 
   const handleFinish = async () => {
+    // Use exactly what the user entered: never fill in made-up figures.
+    if (income.trim() === "" || balance.trim() === "") {
+      setError("Enter your monthly income and current bank balance (0 is fine).");
+      return;
+    }
+    const monthlyIncome = Number(income);
+    const bankBalance = Number(balance);
+    if (!Number.isFinite(monthlyIncome) || monthlyIncome < 0 || !Number.isFinite(bankBalance)) {
+      setError("Enter valid amounts.");
+      return;
+    }
+    setError("");
     setFinishing(true);
     const finalName = name.trim() || "User";
     try {
-      await supabase.auth.updateUser({ data: { full_name: finalName } });
+      if (isSupabaseConfigured) {
+        const { data } = await supabase.auth.getSession();
+        if (data.session) await supabase.auth.updateUser({ data: { full_name: finalName } });
+      }
       setFinished(true);
       setTimeout(() => {
-        setUser({ name: finalName, monthlyIncome: Number(income) || 50000 });
-        setBalance(Number(balance) || 100000);
+        setUser({ name: finalName, monthlyIncome });
+        setBalance(bankBalance);
         completeOnboarding();
       }, 1000);
-    } catch (err: any) {
-      setError(err.message || "Failed to save profile");
+    } catch (err: unknown) {
+      setError(errorMessage(err, "Failed to save profile"));
       setFinishing(false);
     }
   };
@@ -223,9 +228,7 @@ export function OnboardingFlow() {
   };
 
   const handleSkip = () => {
-    setUser({ name: "Demo User", monthlyIncome: 80000 });
-    setBalance(200000);
-    completeOnboarding();
+    dispatch({ type: "LOAD_STATE", payload: buildDemoState() });
   };
 
   // ── UI Content ──
@@ -262,6 +265,20 @@ export function OnboardingFlow() {
   }
 
   const authContent = (
+    !isSupabaseConfigured ? (
+      <div className="space-y-4 text-center">
+        <p className="text-sm text-muted-foreground">
+          Accounts are not configured on this deployment. You can still use the app: your data stays in this browser.
+        </p>
+        <button onClick={() => setStep(1)}
+          className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-medium flex items-center justify-center gap-2">
+          Continue without an account <ArrowRight className="w-4 h-4" />
+        </button>
+        <button onClick={handleSkip} className="text-xs text-muted-foreground hover:text-primary underline underline-offset-2">
+          Explore with sample data
+        </button>
+      </div>
+    ) :
     <div className="space-y-4">
       <div className="flex rounded-xl bg-muted/50 p-1 mb-2">
         {(["signup", "login"] as const).map(m => (
@@ -319,11 +336,10 @@ export function OnboardingFlow() {
         {googleLoading ? "Redirecting..." : "Continue with Google"}
       </button>
       <div className="pt-3 flex flex-col items-center gap-1.5">
-        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Lock className="w-3 h-3 text-success" /> Bank-grade security</p>
-        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Shield className="w-3 h-3 text-success" /> Your data is encrypted & never shared</p>
+        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Lock className="w-3 h-3 text-success" /> Signed-in data is visible only to your account (row-level security)</p>
       </div>
       <div className="flex flex-col items-center gap-2 pt-2">
-        <button onClick={handleSkip} className="text-[11px] text-muted-foreground/60 hover:text-primary transition-colors underline underline-offset-2">Skip & explore demo</button>
+        <button onClick={handleSkip} className="text-[11px] text-muted-foreground/60 hover:text-primary transition-colors underline underline-offset-2">Explore with sample data</button>
       </div>
     </div>
   );

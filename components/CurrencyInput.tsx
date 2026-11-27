@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useEffect, useState } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import { cn } from "@/utils/helpers";
 import { Plus, Minus } from "lucide-react";
 
@@ -41,6 +41,8 @@ interface CurrencyInputProps {
   allowDecimal?: boolean;
   /** Hide the ₹ prefix (for non-currency number fields like months) */
   noPrefix?: boolean;
+  /** Accessible name for screen readers (and tests) when there is no visible <label>. */
+  ariaLabel?: string;
 }
 
 export function CurrencyInput({
@@ -51,6 +53,7 @@ export function CurrencyInput({
   large = false,
   allowDecimal = false,
   noPrefix = false,
+  ariaLabel,
 }: CurrencyInputProps) {
   // Determine display value
   const getDisplay = useCallback((): string => {
@@ -84,13 +87,13 @@ export function CurrencyInput({
     [onChange, allowDecimal]
   );
 
-  const getStep = (current: number) => {
+  const getStep = useCallback((current: number) => {
     if (allowDecimal) return 0.5;
     if (noPrefix) return 1;
     if (current < 50000) return 5000;
     if (current < 500000) return 10000;
     return 50000;
-  };
+  }, [allowDecimal, noPrefix]);
 
   const valRef = useRef(value);
   useEffect(() => { valRef.current = value; }, [value]);
@@ -112,7 +115,7 @@ export function CurrencyInput({
       valRef.current = nextNum.toString();
     }
     onChange(valRef.current);
-  }, [allowDecimal, onChange]);
+  }, [allowDecimal, onChange, getStep]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -166,6 +169,7 @@ export function CurrencyInput({
         onChange={handleChange}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
+        aria-label={ariaLabel}
         className={cn(
           "w-full bg-background border border-border rounded-xl py-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all",
           noPrefix ? "pl-4" : "pl-10",

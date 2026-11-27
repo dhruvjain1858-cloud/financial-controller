@@ -1,6 +1,7 @@
 "use client";
 
-import { LayoutDashboard, CreditCard, PieChart, Landmark, ShieldAlert, Sparkles, Target, Wallet, Receipt, BarChart3 } from "lucide-react";
+import { LayoutDashboard, CreditCard, PieChart, Landmark, ShieldAlert, Sparkles, Target, Receipt, BarChart3, MoreHorizontal } from "lucide-react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/utils/helpers";
@@ -21,9 +22,15 @@ const navItems = [
 
 export const Sidebar = () => {
   const pathname = usePathname();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const isActiveHref = (href: string) => pathname === href || (href !== "/" && pathname.startsWith(href));
+  // Phones: four main pages in the bar, the rest under "More" (all eight stay reachable).
+  const MAIN = ["/", "/transactions", "/loans", "/budgets"];
+  const mainItems = navItems.filter((i) => MAIN.includes(i.href));
+  const moreItems = navItems.filter((i) => !MAIN.includes(i.href));
   const { state } = useFinancial();
   const insights = generateInsights(state);
-  const topInsight = insights[0] || "Add transactions to get AI-powered insights.";
+  const topInsight = insights[0] || "Add transactions to see insights.";
 
   return (
     <>
@@ -64,7 +71,7 @@ export const Sidebar = () => {
           <div className="p-3 rounded-xl glass-card flex flex-col gap-1.5">
             <div className="flex items-center gap-1.5 text-warning">
               <Sparkles className="w-3.5 h-3.5" />
-              <span className="text-[10px] font-semibold uppercase tracking-wider">AI Insight</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wider">Insight</span>
             </div>
             <p className="text-xs text-muted-foreground leading-relaxed">{topInsight}</p>
           </div>
@@ -73,8 +80,18 @@ export const Sidebar = () => {
 
       {/* Mobile Bottom Nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 glass border-t border-border/20">
+        {moreOpen && (
+          <div id="mobile-more-menu" className="absolute bottom-full right-2 mb-2 w-48 glass-card rounded-xl border border-white/10 py-1 shadow-2xl">
+            {moreItems.map((item) => (
+              <Link key={item.name} href={item.href} onClick={() => setMoreOpen(false)}
+                className={cn("flex items-center gap-3 px-3 py-2.5 text-sm", isActiveHref(item.href) ? "text-primary" : "text-muted-foreground")}>
+                <item.icon className="w-4 h-4" /> {item.name}
+              </Link>
+            ))}
+          </div>
+        )}
         <div className="flex justify-around py-2">
-          {navItems.slice(0, 5).map((item) => {
+          {mainItems.map((item) => {
             const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
             return (
               <Link key={item.name} href={item.href}
@@ -85,6 +102,12 @@ export const Sidebar = () => {
               </Link>
             );
           })}
+          <button onClick={() => setMoreOpen((o) => !o)} aria-expanded={moreOpen} aria-controls="mobile-more-menu"
+            className={cn("flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition-colors",
+              moreOpen || moreItems.some((i) => isActiveHref(i.href)) ? "text-primary" : "text-muted-foreground")}>
+            <MoreHorizontal className="w-5 h-5" />
+            <span className="text-[10px]">More</span>
+          </button>
         </div>
       </nav>
     </>

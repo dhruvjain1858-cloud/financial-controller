@@ -7,7 +7,7 @@ import { GradientAreaChart } from "@/components/Chart";
 import { motion } from "framer-motion";
 import { ArrowDownRight, Activity, Wallet, CreditCard, TrendingDown, TrendingUp, Sparkles } from "lucide-react";
 import { useFinancial } from "@/context/FinancialContext";
-import { getHealthScore, getMonthlyExpenses, getMonthlyIncome, generateAlerts, generateInsights, getWeeklyTrend, getRealBalance } from "@/utils/calculations";
+import { getHealthScore, getMonthlyExpenses, getMonthlyIncome, generateAlerts, generateInsights, getWeeklyTrend, getRealBalance, getTotalEmi, getBalanceAfterEmi, getSafeSpendingLimit } from "@/utils/calculations";
 import { QuickAddTransaction } from "@/components/QuickAddTransaction";
 import { PayCardBillModal } from "@/components/modals/PayCardBillModal";
 import { useState } from "react";
@@ -22,12 +22,13 @@ export default function Dashboard() {
   const alerts = generateAlerts(state);
   const insights = generateInsights(state);
   const weeklyTrend = getWeeklyTrend(state.transactions);
-  const totalEmi = state.loans.reduce((s, l) => s + l.emi, 0);
+  const totalEmi = getTotalEmi(state);
+  const balanceAfterEmi = getBalanceAfterEmi(state);
   const totalCardDue = state.cards.reduce((s, c) => s + c.used, 0);
   const realBalance = getRealBalance(state);
   const topAlert = alerts.find(a => a.type === "danger") || alerts.find(a => a.type === "warning");
 
-  const safeLimit = state.user.monthlyIncome > 0 ? realBalance * 0.3 : realBalance * 0.2;
+  const safeLimit = getSafeSpendingLimit(state);
   const spentRatio = state.user.monthlyIncome > 0 ? Math.min(100, (monthlyExp / state.user.monthlyIncome) * 100) : 0;
 
   const statusLabel = healthScore >= 70 ? "Stable" : healthScore >= 40 ? "Caution" : "At Risk";
@@ -131,7 +132,7 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      {/* AI Alert */}
+      {/* Top alert */}
       {topAlert && (
         <AlertBanner type={topAlert.type} title={topAlert.title} description={topAlert.description} />
       )}
@@ -157,8 +158,8 @@ export default function Dashboard() {
           </h3>
           <div className="space-y-3">
             <div className="p-3 rounded-lg bg-card border border-border/50 flex justify-between items-center">
-              <span className="text-muted-foreground text-sm">Current Balance</span>
-              <span className="font-semibold">{formatCurrency(state.balance)}</span>
+              <span className="text-muted-foreground text-sm">Real Balance (after card dues)</span>
+              <span className="font-semibold">{formatCurrency(realBalance)}</span>
             </div>
             {totalEmi > 0 && (
               <div className="p-3 rounded-lg bg-warning/5 border border-warning/20 flex justify-between items-center relative overflow-hidden">
@@ -171,15 +172,15 @@ export default function Dashboard() {
             )}
             <div className="p-3 rounded-lg glass flex justify-between items-center border-t border-white/10">
               <span className="text-muted-foreground font-medium text-sm">Projected Balance</span>
-              <span className={cn("font-bold text-lg", state.balance - totalEmi < 0 ? "text-danger" : "text-primary")}>
-                {formatCurrency(state.balance - totalEmi)}
+              <span className={cn("font-bold text-lg", balanceAfterEmi < 0 ? "text-danger" : "text-primary")}>
+                {formatCurrency(balanceAfterEmi)}
               </span>
             </div>
           </div>
         </Card>
       </div>
 
-      {/* AI Insights */}
+      {/* Rule-based insights */}
       {insights.length > 0 && (
         <Card className="bg-gradient-to-br from-primary/10 to-purple-500/10 border-primary/20">
           <div className="flex gap-3">
@@ -187,7 +188,7 @@ export default function Dashboard() {
               <Sparkles className="w-4 h-4" />
             </div>
             <div className="space-y-2">
-              <h4 className="font-semibold text-primary text-sm">AI Insights</h4>
+              <h4 className="font-semibold text-primary text-sm">Insights</h4>
               {insights.slice(0, 3).map((insight, i) => (
                 <p key={i} className="text-sm text-muted-foreground">• {insight}</p>
               ))}
