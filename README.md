@@ -47,20 +47,23 @@ React UI ──▶ FinancialContext (useReducer: single source of truth for bala
 ```
 
 - **Sync.** After every change, `planSync` diffs the last state confirmed by the server against the new state. It upserts parents before children (cards before transactions) and deletes in the reverse order. Failed writes are kept and retried; the status bar shows "Saved to your account", "Saving…" or a retry prompt.
-- **First sign-in.** If the account is empty, data already in the browser is uploaded once.
+- **First sign-in.** If the account is empty, data already in this browser is uploaded once.
 - **Security.** Responses send `X-Frame-Options: DENY`, `nosniff`, a strict referrer policy and a restrictive permissions policy. The client never sends `user_id`. Postgres fills it from `auth.uid()`, and every policy limits reads and writes to the caller's own rows. A transaction can only reference a card owned by the same user (composite foreign key).
 
 ## Database
 
-`supabase/migrations/0001_finance_schema.sql` creates `users`, `transactions`, `cards`, `loans`, `budgets` and `goals`, with RLS and CHECK constraints: positive amounts, valid types, remaining ≤ total, one budget per category, and card expenses only.
+`supabase/migrations/0001_finance_schema.sql` creates the isolated Financial Controller tables `fc_profiles`, `fc_transactions`, `fc_cards`, `fc_loans`, `fc_budgets` and `fc_goals`. Each financial row is scoped to a Supabase Auth user, has a composite `(user_id, id)` key, and is protected by forced Row Level Security. The migration also restricts table grants so the `anon` role has no direct table access.
 
-Apply it with the Supabase CLI (`supabase db push`) or paste it into the SQL editor.
+**Legacy-data safety:** the migration intentionally does not alter the existing `public.users`, `public.income`, `public.transactions`, `public.cards`, `public.budgets` or `public.goals` tables. Those tables have a different schema. Existing legacy rows remain in place and are not automatically imported into the new app. A separate data-import migration requires a verified mapping from legacy `user_id` values to Supabase Auth users and confirmed transaction semantics.
+
+Review the migration and take a database backup before applying it. It can be applied with the Supabase CLI (`supabase db push`) or in the SQL Editor. It fails closed if any of the new `fc_*` tables already exist, so inspect rather than rerun if it reports that they exist.
 
 ## Setting up Supabase (optional)
 
-1. Create a project at supabase.com and copy its URL and anon key into `.env.local`.
-2. Run `supabase/migrations/0001_finance_schema.sql` in the SQL editor (or `supabase db push`).
-3. Under Authentication, enable Email (OTP) and, if wanted, Google, with `http://localhost:3000` as a redirect URL.
+1. Create a project at supabase.com and copy its URL and publishable/anon key into `.env.local`.
+2. Review and apply `supabase/migrations/0001_finance_schema.sql` once.
+3. Under Authentication, enable Email (OTP) and, if wanted, Google, with the correct local and production redirect URLs.
+4. Test sign-in, persistence, and two-user data isolation in a staging project before using production data.
 
 ## Running locally
 
@@ -74,20 +77,19 @@ npm run dev
 
 | Command | What it checks |
 | --- | --- |
-| `npm test` | 63 unit tests: balance, EMI split and safe-limit maths, affordability, alerts and thresholds, reducer accounting (cards, EMI payments), CSV parsing and export, date formats, categorisation, validation, sync planning, row mapping |
-| `npm run test:db` | Applies the migration to a scratch Postgres and runs RLS tests (other users cannot read, update, delete or impersonate; anonymous sees nothing; invalid rows rejected), then replays sync plans against the real schema |
-| `npx playwright test` | 12 browser tests on a production build: dashboard figures, quick add → budget alert, duplicate-budget rejection, CSV import of credits and debits, paying an EMI, affordability, first-visit onboarding, sample data, mobile navigation, account pages without Supabase, overpayment and past-deadline guards, security headers |
-| `npm run typecheck`, `npm run lint` | TypeScript and ESLint, both clean |
+| `npm test` | Unit tests: balance, EMI split and safe-limit maths, affordability, alerts and thresholds, reducer accounting (cards, EMI payments), CSV parsing and export, date formats, categorisation, validation, sync planning, row mapping |
+| `npm run test:db` | Creates stand-in legacy tables, applies the migration to a disposable Postgres database, runs RLS tests, checks a second run fails closed and leaves the legacy tables' rows and columns untouched, then replays sync plans against the isolated schema |
+| `npx playwright test` | Browser tests on a production build: dashboard figures, quick add, CSV import, EMI payments, affordability, onboarding, sample data, mobile navigation, account pages, guards and security headers |
+| `npm run typecheck`, `npm run lint` | TypeScript and ESLint |
 
-`test:db` needs `DATABASE_URL` pointing at a **scratch** database (it is dropped and recreated). CI runs all of the above against a Postgres 16 service.
+`test:db` needs `DATABASE_URL` pointing at a **disposable scratch database**. The helper drops and recreates the database named in that URL. Never point it at a production Supabase database. CI supplies a local Postgres 16 service and sets `DATABASE_URL` only on the dedicated database-test step.
 
 ## Known limitations
 
-- Not yet verified against a live Supabase project: sign-in emails, Google sign-in redirects and PostgREST writes. GitHub sign-in on `/auth` works only if the GitHub provider is enabled in Supabase.
+- The new schema migration and application calls still require staging verification against a real Supabase project. Local Postgres tests do not exercise Supabase Auth email delivery, OAuth redirects, or PostgREST itself.
+- Legacy records in the old tables are preserved but are not imported into the new `fc_*` tables.
 - Signing in on a device whose account already has data loads the account's data; anything entered on that device before signing in is not merged.
 - Deleting a transaction, card, loan, budget or goal is immediate (no undo).
-
-- The Supabase calls in `supabaseRepo.ts` have not been run against a live Supabase project in CI. The schema, RLS and sync plans are tested on plain Postgres with a stand-in for `auth.uid()` (`supabase/tests/supabase_shim.sql`).
 - Sync is last-write-wins per row. Editing on two devices at once can overwrite one device's change to the same row.
 - Balance is stored as a running total updated by the reducer. Editing a transaction whose card was deleted treats it as a cash transaction.
 - EMIs are paid with a button, not posted automatically on a due date, and there is no forecasting beyond the current month.
