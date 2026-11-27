@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
+import { AuthNotConfigured } from "@/components/AuthNotConfigured";
 import { errorMessage } from "@/utils/errors";
 import { Card } from "@/components/Card";
 import { AlertBanner } from "@/components/AlertBanner";
@@ -10,7 +11,7 @@ import { AlertBanner } from "@/components/AlertBanner";
 import { Mail, ArrowLeft, Loader2 } from "lucide-react";
 import Link from "next/link";
 
-export default function ForgotPassword() {
+function ForgotPasswordInner() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState<{ type: "safe" | "danger"; title: string; message: string } | null>(null);
@@ -130,4 +131,8 @@ export default function ForgotPassword() {
       </div>
     </div>
   );
+}
+
+export default function ForgotPassword() {
+  return isSupabaseConfigured ? <ForgotPasswordInner /> : <AuthNotConfigured />;
 }

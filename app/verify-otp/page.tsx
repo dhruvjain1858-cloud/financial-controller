@@ -2,7 +2,8 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
+import { AuthNotConfigured } from "@/components/AuthNotConfigured";
 import { errorMessage } from "@/utils/errors";
 import { Card } from "@/components/Card";
 import { AlertBanner } from "@/components/AlertBanner";
@@ -154,7 +155,7 @@ function VerifyOTPContent() {
   );
 }
 
-export default function VerifyOTP() {
+function VerifyOTPInner() {
   return (
     <Suspense fallback={
       <div className="min-h-screen flex items-center justify-center">
@@ -164,4 +165,8 @@ export default function VerifyOTP() {
       <VerifyOTPContent />
     </Suspense>
   );
+}
+
+export default function VerifyOTP() {
+  return isSupabaseConfigured ? <VerifyOTPInner /> : <AuthNotConfigured />;
 }

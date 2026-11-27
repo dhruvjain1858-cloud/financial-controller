@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
+import { AuthNotConfigured } from "@/components/AuthNotConfigured";
 import { errorMessage } from "@/utils/errors";
 import { Card } from "@/components/Card";
 import { AlertBanner } from "@/components/AlertBanner";
@@ -11,7 +12,7 @@ import { Mail, Lock, LogIn, UserPlus, Loader2, Sparkles, Github, Chrome } from "
 import Link from "next/link";
 import { signInWithGoogle } from "@/utils/auth";
 
-export default function AuthPage() {
+function AuthPageInner() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -42,6 +43,8 @@ export default function AuthPage() {
             data: {
               full_name: name,
             },
+            // send the confirmation link back to this site, not Supabase's default Site URL
+            emailRedirectTo: window.location.origin,
           },
         });
         if (error) throw error;
@@ -79,6 +82,7 @@ export default function AuthPage() {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider,
+        options: { redirectTo: window.location.origin },
       });
       if (error) throw error;
     } catch (error: unknown) {
@@ -319,4 +323,8 @@ export default function AuthPage() {
       </div>
     </div>
   );
+}
+
+export default function AuthPage() {
+  return isSupabaseConfigured ? <AuthPageInner /> : <AuthNotConfigured />;
 }
