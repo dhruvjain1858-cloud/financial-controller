@@ -51,4 +51,43 @@ describe("balance and card accounting", () => {
     expect(s.transactions).toHaveLength(1);
     expect(s.transactions[0].creditCardId).toBeUndefined();
   });
+
+});
+
+describe("paying an EMI", () => {
+  const loanState = () => makeState({
+    transactions: [], balance: 20000, cards: [],
+    loans: [{ id: "l1", name: "Bike", totalAmount: 80000, remaining: 40000, emi: 4000, interest: 12, monthsRemaining: 10 }],
+  });
+  const pay = (s = loanState(), date = "2026-11-25", txId = "e1") =>
+    financialReducer(s, { type: "PAY_EMI", payload: { loanId: "l1", txId, date } });
+
+  it("books the EMI as a Loans expense and lowers the bank balance", () => {
+    const s = pay();
+    expect(s.balance).toBe(16000);
+    expect(s.transactions[0]).toMatchObject({ type: "expense", amount: 4000, category: "Loans", description: "EMI: Bike" });
+  });
+
+  it("reduces the outstanding amount by the principal part only", () => {
+    // interest = 40,000 x 12% / 12 = 400, so principal = 3,600
+    const loan = pay().loans[0];
+    expect(loan.remaining).toBe(36400);
+    expect(loan.monthsRemaining).toBe(9);
+    expect(loan.lastPaidMonth).toBe("2026-11");
+  });
+
+  it("cannot be paid twice in the same month, but can next month", () => {
+    const once = pay();
+    expect(pay(once, "2026-11-28", "e2")).toBe(once); // unchanged
+    expect(pay(once, "2026-12-02", "e3").transactions).toHaveLength(2);
+  });
+
+  it("caps the final instalment and closes the loan", () => {
+    const s = makeState({ transactions: [], balance: 5000, cards: [],
+      loans: [{ id: "l1", name: "Phone", totalAmount: 30000, remaining: 1500, emi: 2500, interest: 0, monthsRemaining: 1 }] });
+    const after = pay(s);
+    expect(after.transactions[0].amount).toBe(1500);
+    expect(after.loans[0]).toMatchObject({ remaining: 0, monthsRemaining: 0 });
+    expect(pay(after, "2026-12-01", "x")).toBe(after); // closed loans have nothing due
+  });
 });

@@ -21,7 +21,7 @@ export interface TransactionRow {
 export interface CardRow { id: string; name: string; network: string; card_limit: number; used: number }
 export interface LoanRow {
   id: string; name: string; total_amount: number; remaining: number; emi: number;
-  interest: number; months_remaining: number;
+  interest: number; months_remaining: number; last_paid_month: string | null;
 }
 export interface BudgetRow { id: string; category: string; budget_limit: number }
 export interface GoalRow { id: string; title: string; target_amount: number; saved_amount: number; deadline: string | null }
@@ -42,7 +42,7 @@ export const toRow = {
   cards: (c: CreditCard): CardRow => ({ id: c.id, name: c.name, network: c.network, card_limit: c.limit, used: c.used }),
   loans: (l: Loan): LoanRow => ({
     id: l.id, name: l.name, total_amount: l.totalAmount, remaining: l.remaining, emi: l.emi,
-    interest: l.interest, months_remaining: l.monthsRemaining,
+    interest: l.interest, months_remaining: l.monthsRemaining, last_paid_month: l.lastPaidMonth ?? null,
   }),
   budgets: (b: Budget): BudgetRow => ({ id: b.id, category: b.category, budget_limit: b.limit }),
   goals: (g: Goal): GoalRow => ({
@@ -60,6 +60,7 @@ export const fromRow = {
   loans: (r: LoanRow): Loan => ({
     id: r.id, name: r.name, totalAmount: num(r.total_amount), remaining: num(r.remaining), emi: num(r.emi),
     interest: num(r.interest), monthsRemaining: num(r.months_remaining),
+    ...(r.last_paid_month ? { lastPaidMonth: r.last_paid_month } : {}),
   }),
   budgets: (r: BudgetRow): Budget => ({ id: r.id, category: r.category, limit: num(r.budget_limit) }),
   goals: (r: GoalRow): Goal => ({

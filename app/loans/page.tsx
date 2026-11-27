@@ -1,7 +1,8 @@
 "use client";
 
 import { Card } from "@/components/Card";
-import { formatCurrency } from "@/utils/helpers";
+import { formatCurrency, localMonthKey } from "@/utils/helpers";
+import { getBalanceAfterEmi, getTotalEmi, isEmiDue } from "@/utils/calculations";
 import { Landmark, Calendar, Plus, Trash2 } from "lucide-react";
 import { AlertBanner } from "@/components/AlertBanner";
 import { motion } from "framer-motion";
@@ -10,9 +11,12 @@ import { AddLoanModal } from "@/components/modals/AddLoanModal";
 import { useState } from "react";
 
 export default function LoansPage() {
-  const { state, deleteLoan } = useFinancial();
+  const { state, deleteLoan, payEmi } = useFinancial();
   const [showAdd, setShowAdd] = useState(false);
   const totalEmi = state.loans.reduce((s, l) => s + l.emi, 0);
+  const dueEmi = getTotalEmi(state);
+  const afterEmi = getBalanceAfterEmi(state);
+  const thisMonth = localMonthKey();
 
   return (
     <div className="space-y-6">
@@ -28,10 +32,12 @@ export default function LoansPage() {
       </div>
 
       {totalEmi > 0 && (
-        <AlertBanner type="info" title={`Total Monthly EMI: ${formatCurrency(totalEmi)}`}
-          description={state.balance >= totalEmi
-            ? `You have sufficient balance to cover EMIs. Remaining after EMIs: ${formatCurrency(state.balance - totalEmi)}`
-            : `Warning: Your balance may not cover EMIs. Shortfall: ${formatCurrency(totalEmi - state.balance)}`} />
+        <AlertBanner type={afterEmi < 0 ? "danger" : "info"} title={`Total Monthly EMI: ${formatCurrency(totalEmi)}`}
+          description={dueEmi === 0
+            ? "All EMIs for this month are paid."
+            : afterEmi >= 0
+              ? `Still due this month: ${formatCurrency(dueEmi)}. Real balance after card dues and these EMIs: ${formatCurrency(afterEmi)}.`
+              : `Still due this month: ${formatCurrency(dueEmi)}. After card dues you are short by ${formatCurrency(-afterEmi)}.`} />
       )}
 
       {state.loans.length === 0 ? (
@@ -73,7 +79,15 @@ export default function LoansPage() {
                       <p className="text-xl font-bold">{formatCurrency(loan.remaining)}</p>
                       <p className="text-xs text-warning mt-0.5">EMI: {formatCurrency(loan.emi)}/mo</p>
                     </div>
-                    <button onClick={() => deleteLoan(loan.id)}
+                    {isEmiDue(loan, thisMonth) ? (
+                      <button onClick={() => payEmi(loan.id)}
+                        className="px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors">
+                        Pay EMI
+                      </button>
+                    ) : (
+                      <span className="text-xs text-success font-medium">{loan.remaining > 0 ? "Paid this month" : "Closed"}</span>
+                    )}
+                    <button onClick={() => deleteLoan(loan.id)} aria-label={`Delete ${loan.name}`}
                       className="p-2 hover:bg-danger/10 rounded-lg transition-colors text-muted-foreground hover:text-danger">
                       <Trash2 className="w-4 h-4" />
                     </button>

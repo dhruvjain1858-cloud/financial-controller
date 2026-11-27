@@ -91,7 +91,8 @@ declare bad text[] := array[
   $q$insert into public.cards (id,name,card_limit) values ('x4','Zero',0)$q$,
   $q$insert into public.loans (id,name,total_amount,remaining,emi,months_remaining) values ('x5','L',100,200,10,1)$q$,
   $q$insert into public.budgets (id,category,budget_limit) values ('x6','Food',100)$q$,
-  $q$insert into public.goals (id,title,target_amount) values ('x7','G',-5)$q$
+  $q$insert into public.goals (id,title,target_amount) values ('x7','G',-5)$q$,
+  $q$insert into public.loans (id,name,total_amount,remaining,emi,months_remaining,last_paid_month) values ('x8','L',100,50,10,1,'2026-1')$q$
 ];
 q text;
 begin

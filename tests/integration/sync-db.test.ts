@@ -65,7 +65,7 @@ async function load(db: Client, uid: string): Promise<RemoteSnapshot> {
     profile: (await db.query("select * from public.users where auth_id = $1", [uid])).rows[0] ?? null,
     transactions: dates(await q("select id,type,amount,category,to_char(date,'YYYY-MM-DD') as date,description,credit_card_id from public.transactions"), "date") as never,
     cards: (await q("select id,name,network,card_limit,used from public.cards")) as never,
-    loans: (await q("select id,name,total_amount,remaining,emi,interest,months_remaining from public.loans")) as never,
+    loans: (await q("select id,name,total_amount,remaining,emi,interest,months_remaining,last_paid_month from public.loans")) as never,
     budgets: (await q("select id,category,budget_limit from public.budgets")) as never,
     goals: (await q("select id,title,target_amount,saved_amount,to_char(deadline,'YYYY-MM-DD') as deadline from public.goals")) as never,
   };
@@ -110,10 +110,15 @@ describe.skipIf(!url)("sync plans against the real schema with RLS", () => {
     expect(s2.transactions.find((t) => t.id === "t10")?.creditCardId).toBeUndefined();
     const s3 = financialReducer(s2, { type: "UPDATE_TRANSACTION", payload: { id: "t10", type: "expense", amount: 750, category: "Shopping", date: "2026-11-24" } });
     await apply(db, planSync(s2, s3)); // would have failed the FK check before the reducer fix
-    const back = stateFromRemote(await load(db, ALICE));
+    const s4 = financialReducer(s3, { type: "PAY_EMI", payload: { loanId: "l1", txId: "emi1", date: "2026-11-25" } });
+    await apply(db, planSync(s3, s4));
+    const afterEmi = stateFromRemote(await load(db, ALICE));
+    expect(afterEmi.loans.find((l) => l.id === "l1")).toEqual(s4.loans.find((l) => l.id === "l1"));
+    expect(afterEmi.balance).toBe(s4.balance);
+    const back = afterEmi;
     expect(back.cards).toHaveLength(0);
     expect(back.transactions.find((t) => t.id === "t10")?.creditCardId).toBeUndefined();
-    expect(back.transactions).toHaveLength(5);
+    expect(back.transactions).toHaveLength(6); // 4 seeded + t10 + EMI payment
   });
 
   it("keeps each user's data private", async () => {

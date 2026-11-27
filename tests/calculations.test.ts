@@ -9,6 +9,7 @@ import {
   getMonthlyIncome,
   getRealBalance,
   getRiskLevel,
+  assessAffordability,
   getSafeSpendingLimit,
   getSpendingByCategory,
   getTotalEmi,
@@ -36,6 +37,15 @@ describe("real balance and EMI projection", () => {
     expect(getBalanceAfterEmi(makeState())).toBe(10000 - 6500);
   });
 
+  it("stops counting an EMI once this month's instalment is paid", () => {
+    const s = makeState();
+    s.loans[0] = { ...s.loans[0], lastPaidMonth: "2026-11" };
+    expect(getTotalEmi(s)).toBe(2500);
+    s.loans[1] = { ...s.loans[1], remaining: 0, monthsRemaining: 0 };
+    expect(getTotalEmi(s)).toBe(0);
+    expect(generateAlerts(s).some((a) => a.id === "alert-emi")).toBe(false);
+  });
+
   it("reports a shortfall as a negative number", () => {
     expect(getBalanceAfterEmi(makeState({ balance: 32000 }))).toBe(2000 - 6500);
   });
@@ -57,6 +67,26 @@ describe("safe spending limit", () => {
   });
   it("uses 20% when no income is set", () => {
     expect(getSafeSpendingLimit(makeState({ user: { name: "", monthlyIncome: 0 } }))).toBeCloseTo(3500 * 0.2);
+  });
+});
+
+describe("can I afford this?", () => {
+  // fixture: real balance 10,000, EMIs due 6,500 -> 3,500 free; safe limit 1,050
+  it("is safe within the safe spending limit", () => {
+    expect(assessAffordability(makeState(), 1000)).toMatchObject({ status: "safe", afterBalance: 2500 });
+  });
+  it("warns when affordable but above the safe limit", () => {
+    expect(assessAffordability(makeState(), 3000)?.status).toBe("warning");
+  });
+  it("refuses when EMIs due could no longer be paid", () => {
+    // 5,000 fits in the real balance (10,000) but not after 6,500 of EMIs
+    expect(assessAffordability(makeState(), 5000)).toMatchObject({ status: "danger", afterBalance: -1500 });
+  });
+  it("reports card utilisation if paid by card, and ignores invalid amounts", () => {
+    expect(assessAffordability(makeState(), 10000)?.utilizationIfCard).toBe(40);
+    expect(assessAffordability(makeState({ cards: [] }), 10)?.utilizationIfCard).toBeNull();
+    expect(assessAffordability(makeState(), 0)).toBeNull();
+    expect(assessAffordability(makeState(), Number.NaN)).toBeNull();
   });
 });
 
@@ -115,6 +145,7 @@ describe("alerts", () => {
   it("raises the EMI reminder with the total due", () => {
     const emi = generateAlerts(makeState()).find((a) => a.id === "alert-emi");
     expect(emi?.description).toContain("6,500");
+    expect(emi?.description).toContain("still due");
   });
 
   it("warns at 80% of a budget and flags 100%", () => {

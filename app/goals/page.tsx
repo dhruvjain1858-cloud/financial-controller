@@ -30,7 +30,10 @@ export default function GoalsPage() {
   };
 
   const spending = getSpendingByCategory(state.transactions);
-  const topCategory = spending.length > 0 ? spending[0].name : "unnecessary";
+  // Suggest cutting discretionary spending only: rent, bills and EMIs are fixed in the short term.
+  const FIXED = ["Housing", "Utilities", "Loans", "Education", "Healthcare"];
+  const discretionary = spending.filter((s) => !FIXED.includes(s.name));
+  const topCategory = discretionary.length > 0 ? discretionary[0].name : "non-essential";
   const monthlyIncome = state.user.monthlyIncome || 1; // prevent division by zero
 
   return (

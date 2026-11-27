@@ -4,7 +4,7 @@ import { Bell, User, Zap, Moon, Sun, Plus, Minus, LogOut, Settings, UploadCloud 
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useRef, useEffect } from "react";
 import { useFinancial } from "@/context/FinancialContext";
-import { generateAlerts, getRealBalance } from "@/utils/calculations";
+import { generateAlerts, assessAffordability } from "@/utils/calculations";
 import { AddExpenseModal } from "@/components/modals/AddExpenseModal";
 import { AddIncomeModal } from "@/components/modals/AddIncomeModal";
 import { EditProfileModal } from "@/components/modals/EditProfileModal";
@@ -128,28 +128,8 @@ function AffordabilityModal({ isOpen, onClose }: { isOpen: boolean; onClose: () 
   const { state } = useFinancial();
   const [amount, setAmount] = useState("");
 
-  const totalCardUsed = state.cards.reduce((s, c) => s + c.used, 0);
   const totalCardLimit = state.cards.reduce((s, c) => s + c.limit, 0);
-
-  const simulate = () => {
-    const num = Number(amount);
-    if (!num || num <= 0) return null;
-    
-    // Core Affordability change: Use Real Balance
-    const realBalance = getRealBalance(state);
-    const safeMargin = realBalance * 0.3;
-    const afterBalance = realBalance - num;
-    const newUtil = totalCardLimit > 0 ? Math.round(((totalCardUsed + num) / totalCardLimit) * 100) : 0;
-
-    if (num <= realBalance - safeMargin && num < realBalance * 0.5) {
-      return { status: "safe" as const, message: "Safe to proceed. This won't impact your financial safety.", afterBalance, newUtil };
-    } else if (num <= realBalance) {
-      return { status: "warning" as const, message: "This purchase eats into your safety margin. Proceed with caution.", afterBalance, newUtil };
-    }
-    return { status: "danger" as const, message: "Not recommended. This will push your real balance into deficit.", afterBalance, newUtil };
-  };
-
-  const sim = simulate();
+  const sim = assessAffordability(state, Number(amount));
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Can I Afford This?">
@@ -159,6 +139,7 @@ function AffordabilityModal({ isOpen, onClose }: { isOpen: boolean; onClose: () 
           value={amount}
           onChange={(v) => setAmount(v)}
           placeholder="0"
+          ariaLabel="Purchase amount"
           large
         />
         {sim && (
@@ -168,13 +149,13 @@ function AffordabilityModal({ isOpen, onClose }: { isOpen: boolean; onClose: () 
               description={sim.message} />
             <div className="mt-4 space-y-2.5 p-4 rounded-xl bg-card border border-border/50">
               <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">After Purchase Real Balance</span>
+                <span className="text-muted-foreground">Left after purchase, card dues and EMIs</span>
                 <span className={cn("font-semibold", sim.afterBalance < 0 ? "text-danger" : "text-foreground")}>{formatCurrency(sim.afterBalance)}</span>
               </div>
-              {totalCardLimit > 0 && (
+              {totalCardLimit > 0 && sim.utilizationIfCard !== null && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Credit Utilization</span>
-                  <span className={cn("font-semibold", sim.newUtil > 70 ? "text-danger" : sim.newUtil > 50 ? "text-warning" : "text-success")}>{sim.newUtil}%</span>
+                  <span className="text-muted-foreground">Card utilisation if paid by card</span>
+                  <span className={cn("font-semibold", sim.utilizationIfCard > 70 ? "text-danger" : sim.utilizationIfCard > 50 ? "text-warning" : "text-success")}>{sim.utilizationIfCard}%</span>
                 </div>
               )}
             </div>

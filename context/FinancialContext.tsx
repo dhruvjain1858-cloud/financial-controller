@@ -12,6 +12,9 @@ import {
   initialState,
 } from "@/types";
 import { detectCategory } from "@/utils/smartInput";
+import { isEmiDue, splitEmi } from "@/utils/calculations";
+import { todayISO } from "@/utils/helpers";
+import { useRouter } from "next/navigation";
 import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
 import {
   sanitizeState,
@@ -46,6 +49,7 @@ export type Action =
   | { type: "ADD_LOAN"; payload: Loan }
   | { type: "UPDATE_LOAN"; payload: Loan }
   | { type: "DELETE_LOAN"; payload: string }
+  | { type: "PAY_EMI"; payload: { loanId: string; txId: string; date: string } }
   // budgets
   | { type: "ADD_BUDGET"; payload: Budget }
   | { type: "UPDATE_BUDGET"; payload: Budget }
@@ -179,6 +183,31 @@ export function financialReducer(state: FinancialState, action: Action): Financi
       return { ...state, loans: [...state.loans, action.payload] };
     case "UPDATE_LOAN":
       return { ...state, loans: state.loans.map((l) => (l.id === action.payload.id ? action.payload : l)) };
+    case "PAY_EMI": {
+      // One action so the expense and the loan update can never get out of step.
+      const loan = state.loans.find((l) => l.id === action.payload.loanId);
+      const month = action.payload.date.slice(0, 7);
+      if (!loan || !isEmiDue(loan, month)) return state;
+      const { principal, payment } = splitEmi(loan);
+      if (payment <= 0) return state;
+      const remaining = Math.max(0, Math.round((loan.remaining - principal) * 100) / 100);
+      const paid: Loan = {
+        ...loan,
+        remaining,
+        monthsRemaining: remaining === 0 ? 0 : Math.max(0, loan.monthsRemaining - 1),
+        lastPaidMonth: month,
+      };
+      const tx: Transaction = {
+        id: action.payload.txId, type: "expense", amount: payment, category: "Loans",
+        date: action.payload.date, description: `EMI: ${loan.name}`,
+      };
+      return {
+        ...state,
+        balance: state.balance - payment,
+        loans: state.loans.map((l) => (l.id === loan.id ? paid : l)),
+        transactions: [tx, ...state.transactions],
+      };
+    }
     case "DELETE_LOAN":
       return { ...state, loans: state.loans.filter((l) => l.id !== action.payload) };
 
@@ -243,6 +272,8 @@ interface FinancialContextType {
   addLoan: (loan: Omit<Loan, "id">) => ValidationResult<Loan>;
   updateLoan: (loan: Loan) => ValidationResult<Loan>;
   deleteLoan: (id: string) => void;
+  /** Pays this month's EMI for a loan: books a Loans expense and reduces what is owed. */
+  payEmi: (loanId: string) => void;
   addBudget: (budget: Omit<Budget, "id">) => ValidationResult<Budget>;
   updateBudget: (budget: Budget) => ValidationResult<Budget>;
   deleteBudget: (id: string) => void;
@@ -290,6 +321,7 @@ function readLocalState(): FinancialState | null {
 // ─── Provider ───────────────────────────────────────────────────
 export function FinancialProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(financialReducer, initialState);
+  const router = useRouter();
   const [loaded, setLoaded] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("local");
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -323,11 +355,11 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
       const remote = await loadRemote(supabase, authId);
       const local = stateRef.current;
       if (isRemoteEmpty(remote)) {
-        // First sign-in on this account: move what is in this browser to the database.
-        const seed: FinancialState = {
-          ...local,
-          user: { ...local.user, name: local.user.name || fallbackName, isDemo: false },
-        };
+        // First sign-in on this account: move what is in this browser to the database
+        // (sample data is never uploaded; the user starts onboarding fresh instead).
+        const seed: FinancialState = local.user.isDemo
+          ? { ...initialState, user: { name: fallbackName, monthlyIncome: 0, isDemo: false } }
+          : { ...local, user: { ...local.user, name: local.user.name || fallbackName, isDemo: false } };
         const plan = planSync({ ...initialState, categories: [] }, seed);
         plan.profile = { ...plan.profile!, email: email ?? null };
         await applyPlan(supabase, plan);
@@ -458,6 +490,10 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "DELETE_LOAN", payload: id });
   }, []);
 
+  const payEmi = useCallback((loanId: string) => {
+    dispatch({ type: "PAY_EMI", payload: { loanId, txId: generateId(), date: todayISO() } });
+  }, []);
+
   const addBudget = useCallback((budget: Omit<Budget, "id">) => {
     if (stateRef.current.budgets.some((b) => b.category === budget.category)) {
       const r: ValidationResult<Budget> = { ok: false, error: `category: a ${budget.category} budget already exists` };
@@ -507,10 +543,13 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     await queueRef.current; // let pending writes finish
+    syncedRef.current = null; // stop syncing before the state is cleared
     if (isSupabaseConfigured) await supabase.auth.signOut();
     localStorage.removeItem(STORAGE_KEY); // only this app's cache, not every site key
-    window.location.href = "/";
-  }, []);
+    dispatch({ type: "SIGN_OUT" }); // back to an empty, not-onboarded state
+    setSyncStatus("local");
+    router.replace("/");
+  }, [router]);
 
   const clearActionError = useCallback(() => setActionError(null), []);
 
@@ -536,6 +575,7 @@ export function FinancialProvider({ children }: { children: ReactNode }) {
         addLoan,
         updateLoan,
         deleteLoan,
+        payEmi,
         addBudget,
         updateBudget,
         deleteBudget,

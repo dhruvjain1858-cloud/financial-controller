@@ -45,6 +45,7 @@ export const loanSchema = z
     emi: positive,
     interest: money.min(0).max(100),
     monthsRemaining: z.number().int().nonnegative(),
+    lastPaidMonth: z.string().regex(/^\d{4}-\d{2}$/).optional(),
   })
   .refine((l) => l.remaining <= l.totalAmount, {
     message: "Remaining cannot exceed the total amount",

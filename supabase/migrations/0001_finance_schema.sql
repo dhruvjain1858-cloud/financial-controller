@@ -58,6 +58,7 @@ create table if not exists public.loans (
   emi              numeric(14,2) not null check (emi > 0),
   interest         numeric(6,3) not null default 0 check (interest >= 0 and interest <= 100),
   months_remaining integer not null check (months_remaining >= 0),
+  last_paid_month  text check (last_paid_month ~ '^\d{4}-\d{2}$'),
   primary key (user_id, id),
   check (remaining <= total_amount)
 );

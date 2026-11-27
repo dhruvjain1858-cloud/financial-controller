@@ -87,6 +87,8 @@ describe("row mapping", () => {
     for (const t of s.transactions) expect(fromRow.transactions(toRow.transactions(t))).toEqual(t);
     for (const c of s.cards) expect(fromRow.cards(toRow.cards(c))).toEqual(c);
     for (const l of s.loans) expect(fromRow.loans(toRow.loans(l))).toEqual(l);
+    const paid = { ...s.loans[0], lastPaidMonth: "2026-11" };
+    expect(fromRow.loans(toRow.loans(paid))).toEqual(paid);
     for (const b of s.budgets) expect(fromRow.budgets(toRow.budgets(b))).toEqual(b);
     for (const g of s.goals) expect(fromRow.goals(toRow.goals(g))).toEqual(g);
   });

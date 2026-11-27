@@ -41,6 +41,8 @@ interface CurrencyInputProps {
   allowDecimal?: boolean;
   /** Hide the ₹ prefix (for non-currency number fields like months) */
   noPrefix?: boolean;
+  /** Accessible name for screen readers (and tests) when there is no visible <label>. */
+  ariaLabel?: string;
 }
 
 export function CurrencyInput({
@@ -51,6 +53,7 @@ export function CurrencyInput({
   large = false,
   allowDecimal = false,
   noPrefix = false,
+  ariaLabel,
 }: CurrencyInputProps) {
   // Determine display value
   const getDisplay = useCallback((): string => {
@@ -166,6 +169,7 @@ export function CurrencyInput({
         onChange={handleChange}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
+        aria-label={ariaLabel}
         className={cn(
           "w-full bg-background border border-border rounded-xl py-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all",
           noPrefix ? "pl-4" : "pl-10",
