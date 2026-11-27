@@ -1,14 +1,18 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
-// DEBUG LOGS (Remove in production)
-console.log("Supabase URL:", supabaseUrl)
-console.log("Supabase Key Length:", supabaseKey?.length || 0)
+/**
+ * True when both public Supabase env vars are set. Without them the app runs in
+ * local-only mode: data stays in this browser and sign-in is unavailable.
+ * (The anon key is designed to be public; data is protected by Row Level Security.)
+ */
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
-if (!supabaseUrl || !supabaseKey) {
-    console.error("Supabase environment variables are missing! Check your .env.local file.")
-}
-
-export const supabase = createClient(supabaseUrl, supabaseKey)
+// createClient throws on an empty URL, which would crash every page at import time.
+// A placeholder keeps local-only mode working; no request is made while unconfigured.
+export const supabase = createClient(
+  isSupabaseConfigured ? supabaseUrl : "http://localhost:54321",
+  isSupabaseConfigured ? supabaseAnonKey : "local-only-mode"
+);
