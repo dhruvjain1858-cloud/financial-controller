@@ -4,6 +4,8 @@ A personal-finance web app built around one question: **how much can I actually 
 
 Most expense trackers show what you spent. Financial Controller subtracts what you already owe (credit-card dues and this month's EMIs) and shows the money that is really free.
 
+**Live demo:** https://financial-controller-theta.vercel.app (choose "Explore with sample data" to try it without an account)
+
 | Dashboard | Loans & EMIs | Mobile |
 | --- | --- | --- |
 | ![Dashboard](docs/screenshots/dashboard-desktop.png) | ![Loans](docs/screenshots/loans.png) | ![Mobile](docs/screenshots/dashboard-mobile.png) |
@@ -64,6 +66,8 @@ Review the migration and take a database backup before applying it. It can be ap
 2. Review and apply `supabase/migrations/0001_finance_schema.sql` once.
 3. Under Authentication, enable Email (OTP) and, if wanted, Google, with the correct local and production redirect URLs.
 4. Test sign-in, persistence, and two-user data isolation in a staging project before using production data.
+
+A step-by-step checklist for the deployed site is in [docs/SUPABASE_SETUP.md](docs/SUPABASE_SETUP.md).
 
 ## Running locally
 
